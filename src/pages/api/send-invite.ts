@@ -31,11 +31,12 @@ const sendInviteEmail = async ({ to, inviteLink, serverName, senderName }: SendI
     subject: hasProperConfig ? `You're invited to join ${serverName} on SquareUp!` : 'Test',
     html: hasProperConfig ? `
       <p>Hello,</p>
-      <p><b>${senderName}</b> has invited you to join the server <b>${serverName}</b> on SquareUp.</p>
-      <p>To join, please click on the link below:</p>
-      <p><a href="${inviteLink}">${inviteLink}</a></p>
-      <p>If you don't have an account, you will be prompted to create one.</p>
-      <p>Thanks,</p>
+      <p><b>${senderName}</b> has invited you to join the <b>${serverName}</b> community on SquareUp!</p>
+      <p>SquareUp is an expense management app that helps groups track and split expenses fairly.</p>
+      <p>To get started, please click on the link below:</p>
+      <p><a href="${inviteLink}" style="background-color: #0070BA; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0;">Join SquareUp</a></p>
+      <p>This will take you to our app where you can create your own expense groups and start managing shared costs with friends and family.</p>
+      <p>Welcome to the community! 🎉</p>
       <p>The SquareUp Team</p>
     ` : `
       <p>Hello,</p>

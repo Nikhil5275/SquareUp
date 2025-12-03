@@ -49,16 +49,16 @@ export default function JoinServerPage() {
         setLoading(true);
         setError(null);
         try {
-            // For the simple version, we'll just add the user directly to the server
-            // In a real implementation, you'd validate the invitation token
+            // For the current localStorage-based system, we can't actually add users to shared servers
+            // Each user has their own isolated servers. In a real app, this would add them to a shared server
             toast({
-                title: "Successfully joined server!",
-                description: server ? `Welcome to ${server}!` : "Welcome to the server!",
+                title: "Welcome to SquareUp!",
+                description: `Thanks for accepting the invitation to ${server || 'our community'}! You can now create your own servers and invite others.`,
                 status: "success",
                 duration: 5000,
                 isClosable: true,
             });
-            router.push('/'); // Redirect to home page
+            router.push('/'); // Redirect to home page where they can create their own servers
         } catch (err) {
             console.error("Error joining server:", err);
             setError((err as Error).message || 'Failed to join server');
