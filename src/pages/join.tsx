@@ -61,24 +61,20 @@ export default function JoinServerPage() {
 
             if (!existingServer) {
                 // Create a new server for the invited user
+                const initialDebts = serverName !== 'Invited Group' ? [{
+                    from: 'System',
+                    to: currentUser.displayName || currentUser.email || 'You',
+                    amount: 0,
+                }] : [];
+
                 const newServer = {
                     id: Date.now().toString(),
                     name: serverName,
                     members: [currentUser.displayName || currentUser.email || 'You'],
-                    debts: [],
+                    debts: initialDebts,
                     requests: [],
                     createdAt: Date.now(),
                 };
-
-                // Add some sample data to make it feel like a real group
-                if (serverName !== 'Invited Group') {
-                    // Add a welcome debt to show how the system works
-                    newServer.debts = [{
-                        from: 'System',
-                        to: currentUser.displayName || currentUser.email || 'You',
-                        amount: 0,
-                    }];
-                }
 
                 existingServers.push(newServer);
                 localStorage.setItem(`servers_${userId}`, JSON.stringify(existingServers));
