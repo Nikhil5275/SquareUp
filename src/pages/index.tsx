@@ -62,6 +62,8 @@ const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 
 export default function Home() {
   // Local state for forms
   const [newMember, setNewMember] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [requestTo, setRequestTo] = useState("");
@@ -288,6 +290,73 @@ export default function Home() {
     }
   };
 
+  // Send email invitation
+  const sendInvitation = async () => {
+    if (!user || !currentServer || !inviteEmail.trim()) return;
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(inviteEmail.trim())) {
+      toast({
+        title: "Invalid email",
+        description: "Please enter a valid email address",
+        status: "warning",
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+
+    setIsSendingInvite(true);
+
+    try {
+      // Generate invite link (simple version)
+      const inviteLink = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/join?email=${encodeURIComponent(inviteEmail.trim())}&server=${encodeURIComponent(currentServer.name)}`;
+
+      // Send the invitation email
+      const emailResponse = await fetch('/api/send-invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: inviteEmail.trim(),
+          inviteLink,
+          serverName: currentServer.name,
+          senderName: user.displayName || user.email || 'Someone',
+        }),
+      });
+
+      if (!emailResponse.ok) {
+        const errorData = await emailResponse.json();
+        throw new Error(errorData.message || 'Failed to send invitation email');
+      }
+
+      const result = await emailResponse.json();
+
+      toast({
+        title: "Invitation sent!",
+        description: `An email has been sent to ${inviteEmail}`,
+        status: "success",
+        duration: 5000,
+        isClosable: true,
+      });
+
+      setInviteEmail("");
+
+    } catch (error: any) {
+      console.error('Error sending invitation:', error);
+      toast({
+        title: "Failed to send invitation",
+        description: error.message || "An error occurred while sending the invitation",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
 
   const toggleBackground = () => setIsDarkMode((prev) => !prev);
 
@@ -879,7 +948,7 @@ export default function Home() {
                         </VStack>
                       </TabPanel>
 
-                      {/* Add People Tab */}
+                      {/* Group Tab */}
                       <TabPanel px={6} py={8}>
                         {user ? (
                           <VStack spacing={6} maxW="700px" mx="auto" align="stretch">
@@ -892,18 +961,19 @@ export default function Home() {
                                 textTransform="uppercase"
                                 letterSpacing="0.05em"
                               >
-                                Add Member
+                                Invite Member
                               </FormLabel>
                               <HStack spacing={2}>
                                 <Input
-                                  placeholder="Enter name"
-                                  value={newMember}
-                                  onChange={(e) => setNewMember(e.target.value)}
+                                  placeholder="Enter email address"
+                                  value={inviteEmail}
+                                  onChange={(e) => setInviteEmail(e.target.value)}
                                   onKeyPress={(e) => {
                                     if (e.key === "Enter") {
-                                      handleAddPerson();
+                                      sendInvitation();
                                     }
                                   }}
+                                  type="email"
                                   bg={cardBg}
                                   color={textColor}
                                   size="md"
@@ -918,21 +988,33 @@ export default function Home() {
                                   }}
                                 />
                                 <Button
-                                  leftIcon={<Icon as={FiPlus} />}
+                                  leftIcon={<Icon as={FiSend} />}
                                   bg={primary}
-                                  color="black"
+                                  color="white"
                                   size="md"
                                   px={6}
-                                  fontWeight="500"
+                                  fontWeight="600"
+                                  fontSize="sm"
+                                  rounded="lg"
+                                  h="44px"
                                   _hover={{
                                     bg: primaryHover,
+                                    transform: "translateY(-2px)",
+                                    boxShadow: "lg"
                                   }}
-                                  onClick={handleAddPerson}
-                                  isDisabled={!newMember.trim()}
+                                  _active={{ transform: "translateY(0)" }}
+                                  transition="all 0.2s"
+                                  onClick={sendInvitation}
+                                  isDisabled={!inviteEmail.trim() || isSendingInvite}
+                                  isLoading={isSendingInvite}
+                                  loadingText="Sending..."
                                 >
-                                  Add
+                                  Send Invite
                                 </Button>
                               </HStack>
+                              <Text fontSize="xs" color={mutedText} mt={2}>
+                                Send an email invitation to add someone to this group
+                              </Text>
                             </Box>
 
                             {groupMembers.length > 0 && (
@@ -941,6 +1023,9 @@ export default function Home() {
                                 <Box>
                                   <Text fontSize="sm" fontWeight="600" color={textColor} mb={4}>
                                     Group Members ({groupMembers.length})
+                                  </Text>
+                                  <Text fontSize="xs" color={mutedText} mb={4}>
+                                    Members who have accepted their email invitations
                                   </Text>
                                   <VStack spacing={3} align="stretch">
                                     {groupMembers.map((name, idx) => (
