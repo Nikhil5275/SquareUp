@@ -10,6 +10,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
+      // Check if adminDb is initialized
+      if (!adminDb) {
+        return res.status(500).json({
+          message: "Firebase Admin SDK not initialized. Please check service account configuration.",
+          error: "Firebase Admin SDK not initialized"
+        });
+      }
+
       const inviteRef = adminDb.collection("invitations").doc(token);
       const inviteSnap = await inviteRef.get();
 
@@ -18,6 +26,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       const inviteData = inviteSnap.data();
+
+      // Check if inviteData exists (even after exists() check, data() can return undefined)
+      if (!inviteData) {
+        return res.status(404).json({ message: 'Invitation data not found.' });
+      }
 
       if (inviteData.used) {
         return res.status(400).json({ message: 'This invitation has already been used.' });

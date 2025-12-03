@@ -370,7 +370,12 @@ export default function Home() {
     if (!user) return;
 
     try {
-      if (paymentProvider === 'venmo' || paymentProvider === 'paypal') {
+      if (paymentProvider === 'stripe') {
+        // For Stripe, close modal first since redirect will happen immediately
+        onClose();
+        closePaymentModal();
+        // Note: processPayment will redirect, so code below won't execute for Stripe
+      } else if (paymentProvider === 'venmo' || paymentProvider === 'paypal') {
         toast({
           title: `${paymentProvider === 'venmo' ? 'Venmo' : 'PayPal'} Payment`,
           description: `Redirecting to ${paymentProvider === 'venmo' ? 'Venmo' : 'PayPal'}...`,
@@ -383,8 +388,11 @@ export default function Home() {
         removeDebt(selectedServerId!, debtIndex);
       });
 
-      onClose();
-      closePaymentModal();
+      // Only close modal for non-Stripe payments (Stripe already closed above)
+      if (paymentProvider !== 'stripe') {
+        onClose();
+        closePaymentModal();
+      }
     } catch (error: any) {
       console.error('Payment error:', error);
       toast({
@@ -394,6 +402,7 @@ export default function Home() {
         duration: 5000,
         isClosable: true,
       });
+      setIsProcessingPayment(false);
     }
   };
 

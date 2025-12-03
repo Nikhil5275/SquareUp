@@ -56,7 +56,9 @@ export const usePayment = () => {
 
     try {
       if (paymentProvider === 'stripe') {
+        // For Stripe, redirect immediately - cleanup will happen via URL params on return
         await processStripePayment(selectedDebt, serverId, userId);
+        // Note: window.location.href redirect happens here, so code below won't execute
       } else if (paymentProvider === 'venmo' || paymentProvider === 'paypal') {
         // For Venmo/PayPal, simulate the process
         setTimeout(() => {
