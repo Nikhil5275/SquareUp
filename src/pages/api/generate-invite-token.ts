@@ -38,18 +38,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       console.log("API Route: adminAuth and adminDb are initialized.");
-      console.log("API Route: Firestore database initialized.");
 
       // Verify the ID token
       let decodedToken;
       try {
         decodedToken = await adminAuth.verifyIdToken(idToken);
         console.log("API Route: ID Token verified. Sender UID:", decodedToken.uid);
-      } catch (tokenError) {
+      } catch (tokenError: any) {
         console.error("API Route: ID Token verification failed:", tokenError);
         return res.status(401).json({
           message: "Invalid authentication token.",
-          error: (tokenError as Error).message
+          error: tokenError.message
         });
       }
 
@@ -73,32 +72,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           used: false,
         });
         console.log("API Route: Invitation document successfully set in Firestore.");
-      } catch (firestoreError) {
+      } catch (firestoreError: any) {
         console.error("API Route: Firestore write failed:", firestoreError);
-        const error = firestoreError as any;
         console.error("API Route: Error details:", {
-          code: error.code,
-          details: error.details,
-          metadata: error.metadata,
-          message: error.message
+          code: firestoreError.code,
+          details: firestoreError.details,
+          metadata: firestoreError.metadata,
+          message: firestoreError.message
         });
 
         // Provide specific error messages based on the error type
-        if (error.code === 16) {
+        if (firestoreError.code === 16) {
           return res.status(500).json({
             message: "Firebase service account authentication failed. Please check service account permissions.",
             error: "Service account authentication error. Ensure the service account has Firestore access.",
             details: "Go to Firebase Console > Project Settings > Service Accounts and verify permissions."
           });
-        } else if (error.code === 7) {
+        } else if (firestoreError.code === 7) {
           return res.status(500).json({
             message: "Firestore permission denied. Service account lacks required permissions.",
-            error: error.message
+            error: firestoreError.message
           });
         } else {
           return res.status(500).json({
             message: "Failed to save invitation to database.",
-            error: error.message
+            error: firestoreError.message
           });
         }
       }
@@ -109,9 +107,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     } catch (error) {
       console.error('Error generating invite token:', error);
       if (error && typeof error === 'object' && 'code' in error && error.code === 'auth/argument-error') {
-        return res.status(401).json({ message: 'Invalid ID token.', error: String(error) });
+        return res.status(401).json({ message: 'Invalid ID token.', error: (error as unknown as Error).message });
       }
-      res.status(500).json({ message: 'Failed to generate invitation token', error: String(error) });
+      res.status(500).json({ message: 'Failed to generate invitation token', error: (error as unknown as Error).message });
     }
   } else {
     res.setHeader('Allow', ['POST']);

@@ -1,116 +1,66 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
-  Box, Divider, Button, Heading, Text, Input, VStack, HStack, useToast, Tabs,
+  Box, Divider, Button, Text, Input, VStack, HStack, useToast, Tabs,
   TabList,
   Tab,
   TabPanels,
   TabPanel,
   Avatar,
-  Switch,
   Card,
-  CardHeader,
   CardBody,
   CardFooter,
   Icon,
   Select,
   Badge,
   Container,
-  Flex,
-  IconButton,
-  useColorModeValue,
-  Stack,
   FormLabel,
   NumberInput,
   NumberInputField,
-  Tooltip,
+  useColorModeValue,
 } from "@chakra-ui/react";
-import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, arrayUnion, arrayRemove, deleteDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
 import {
   FiDollarSign,
   FiUsers,
   FiTrendingUp,
-  FiMoon,
-  FiSun,
-  FiLogOut,
-  FiLogIn,
   FiPlus,
   FiCheckCircle,
   FiX,
   FiEdit2,
   FiTrash2,
   FiMenu,
-  FiServer,
-  FiChevronRight,
-  FiSettings,
   FiCreditCard,
-  FiZap,
   FiSend,
   FiCheck,
-  FiXCircle
+  FiXCircle,
+  FiServer,
+  FiLogIn
 } from "react-icons/fi";
 import { loadStripe } from '@stripe/stripe-js';
-import {
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalHeader,
-  ModalFooter,
-  ModalBody,
-  ModalCloseButton,
-  useDisclosure,
-  Radio,
-  RadioGroup,
-} from "@chakra-ui/react";
+import { useDisclosure } from "@chakra-ui/react";
+
+// Components
+import { Sidebar } from "../components/Sidebar";
+import { Header } from "../components/Header";
+import { PaymentModal } from "../components/PaymentModal";
+
+// Hooks
+import { useAuth } from "../hooks/useAuth";
+import { useServers } from "../hooks/useServers";
+import { usePayment } from "../hooks/usePayment";
+
+// Types
+import { MoneyRequest } from "../types";
+
+// Config
+import { primary, successColor, errorColor, warningColor } from "../constants/theme";
 
 // Initialize Stripe
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '');
 
-
-// Professional logo matching PayPal/Venmo style
-const SquareUpLogo = ({ isDark }: { isDark: boolean }) => (
-  <Box
-    w="40px"
-    h="40px"
-    bg="#0070BA"
-    display="flex"
-    alignItems="center"
-    justifyContent="center"
-    rounded="xl"
-    boxShadow="0 2px 8px rgba(0,112,186,0.2)"
-  >
-    <Icon viewBox="0 0 24 24" boxSize={6} color="#ffffff">
-      <path fill="currentColor" d="M12 4l-6 8h4v8h4v-8h4z" />
-    </Icon>
-  </Box>
-);
-
-interface MoneyRequest {
-  id: string;
-  from: string; // Person requesting money (logged-in user)
-  to: string; // Person who needs to pay
-  amount: number;
-  description?: string;
-  status: 'pending' | 'approved' | 'rejected';
-  createdAt: number;
-}
-
-interface Server {
-  id: string;
-  name: string;
-  members: string[];
-  debts: { from: string; to: string; amount: number }[];
-  requests: MoneyRequest[];
-  createdAt: number;
-  ownerId: string;
-}
+// Firebase auth and provider imported from firebase.ts
 
 export default function Home() {
-  const [servers, setServers] = useState<Server[]>([]);
-  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
-  const [newServerName, setNewServerName] = useState("");
-  const [isCreatingServer, setIsCreatingServer] = useState(false);
+  // Local state for forms
   const [newMember, setNewMember] = useState("");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
@@ -119,16 +69,43 @@ export default function Home() {
   const [requestDescription, setRequestDescription] = useState("");
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [user, setUser] = useState<any>(null);
-  const [selectedDebt, setSelectedDebt] = useState<{ from: string; to: string; amount: number; index: number } | null>(null);
-  const [paymentProvider, setPaymentProvider] = useState<string>('stripe');
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // Hooks
+  const { user, login, logout } = useAuth();
+  const {
+    servers,
+    selectedServerId,
+    currentServer,
+    isCreatingServer,
+    newServerName,
+    setSelectedServerId,
+    setIsCreatingServer,
+    setNewServerName,
+    createServer,
+    deleteServer,
+    addMember,
+    addDebt,
+    simplifyDebts,
+    addRequest,
+    updateRequest,
+    approveRequest,
+    removeDebt,
+  } = useServers(user);
+
+  const {
+    selectedDebt,
+    paymentProvider,
+    isProcessingPayment,
+    setPaymentProvider,
+    initiatePayment,
+    processPayment,
+    closePaymentModal,
+  } = usePayment();
+
   const { isOpen, onOpen, onClose } = useDisclosure();
   const toast = useToast();
-  const isFirstLoad = useRef(true);
 
   // Get current server data
-  const currentServer = servers.find(s => s.id === selectedServerId);
   const groupMembers = currentServer?.members || [];
   const debts = currentServer?.debts || [];
   const requests = currentServer?.requests || [];
@@ -141,76 +118,6 @@ export default function Home() {
     r => r.from === (user?.displayName || user?.email) && r.status === 'pending'
   );
   const allRequests = requests;
-
-  // Auth state listener
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        // Check for local storage data and migrate if it exists
-        const localStorageServers = localStorage.getItem(`servers_${currentUser.uid}`);
-        if (localStorageServers && isFirstLoad.current) {
-          const parsedServers = JSON.parse(localStorageServers);
-          for (const server of parsedServers) {
-            const serverRef = doc(db, "servers", server.id);
-            await setDoc(serverRef, { ...server, ownerId: currentUser.uid }, { merge: true });
-          }
-          localStorage.removeItem(`servers_${currentUser.uid}`);
-          toast({
-            title: "Data migrated",
-            description: "Your local data has been migrated to the cloud!",
-            status: "info",
-            duration: 5000,
-            isClosable: true,
-          });
-        }
-
-        // Load servers from Firestore
-        const q = query(collection(db, "servers"), where("ownerId", "==", currentUser.uid));
-        const querySnapshot = await getDocs(q);
-        const firestoreServers: Server[] = [];
-        querySnapshot.forEach((doc) => {
-          firestoreServers.push(doc.data() as Server);
-        });
-        setServers(firestoreServers);
-        if (firestoreServers.length > 0 && !selectedServerId) {
-          setSelectedServerId(firestoreServers[0].id);
-        }
-        isFirstLoad.current = false;
-      } else {
-        setServers([]);
-        setSelectedServerId(null);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Save servers to Firestore (debounced to avoid excessive writes)
-  useEffect(() => {
-    if (user && servers.length > 0) {
-      const saveServersToFirestore = async () => {
-        for (const server of servers) {
-          const serverRef = doc(db, "servers", server.id);
-          await setDoc(serverRef, { ...server, ownerId: user.uid }, { merge: true });
-        }
-      };
-      const handler = setTimeout(() => {
-        saveServersToFirestore();
-      }, 1000); // Debounce by 1 second
-      return () => clearTimeout(handler);
-    } else if (user && servers.length === 0 && !isFirstLoad.current) {
-      // If user is logged in and there are no servers in state, but it's not the first load,
-      // it means all servers were deleted. Delete them from Firestore as well.
-      const deleteOldServers = async () => {
-        const q = query(collection(db, "servers"), where("ownerId", "==", user.uid));
-        const querySnapshot = await getDocs(q);
-        querySnapshot.forEach(async (document) => {
-          await deleteDoc(doc(db, "servers", document.id));
-        });
-      };
-      deleteOldServers();
-    }
-  }, [servers, user]);
 
   // Handle payment success callback
   useEffect(() => {
@@ -246,7 +153,7 @@ export default function Home() {
   }, []);
 
   // Create new server
-  const createServer = async () => {
+  const handleCreateServer = () => {
     if (!newServerName.trim()) {
       toast({
         title: "Invalid name",
@@ -257,50 +164,23 @@ export default function Home() {
       });
       return;
     }
-    if (!user) {
+
+    const success = createServer(newServerName.trim());
+    if (success) {
+      setNewServerName("");
+      setIsCreatingServer(false);
       toast({
-        title: "Not logged in",
-        description: "Please log in to create a server",
-        status: "error",
-        duration: 3000,
+        title: "Server created",
+        status: "success",
+        duration: 2000,
         isClosable: true,
       });
-      return;
     }
-    const newServer: Server = {
-      id: Date.now().toString(),
-      name: newServerName.trim(),
-      members: [user.displayName || user.email], // Add owner as first member
-      debts: [],
-      requests: [],
-      createdAt: Date.now(),
-      ownerId: user.uid,
-    };
-
-    const serverRef = doc(db, "servers", newServer.id);
-    await setDoc(serverRef, newServer);
-
-    setServers([...servers, newServer]);
-    setSelectedServerId(newServer.id);
-    setNewServerName("");
-    setIsCreatingServer(false);
-    toast({
-      title: "Server created",
-      status: "success",
-      duration: 2000,
-      isClosable: true,
-    });
   };
 
   // Delete server
-  const deleteServer = async (serverId: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "servers", serverId));
-    const updated = servers.filter(s => s.id !== serverId);
-    setServers(updated);
-    if (selectedServerId === serverId) {
-      setSelectedServerId(updated.length > 0 ? updated[0].id : null);
-    }
+  const handleDeleteServer = (serverId: string) => {
+    deleteServer(serverId);
     toast({
       title: "Server deleted",
       status: "info",
@@ -311,10 +191,8 @@ export default function Home() {
 
   // Google Login
   const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      const result = await signInWithPopup(auth, provider);
-      setUser(result.user);
+    const result = await login();
+    if (result.success && result.user) {
       toast({
         title: "Login successful",
         description: `Welcome ${result.user.displayName}`,
@@ -322,8 +200,7 @@ export default function Home() {
         duration: 3000,
         isClosable: true,
       });
-    } catch (err) {
-      console.error(err);
+    } else {
       toast({
         title: "Login failed",
         status: "error",
@@ -334,8 +211,7 @@ export default function Home() {
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
-    setUser(null);
+    await logout();
     toast({
       title: "Logged out",
       status: "info",
@@ -345,8 +221,8 @@ export default function Home() {
   };
 
   // ➕ Add a new person
-  const addPerson = async () => {
-    if (!currentServer || !user) return;
+  const handleAddPerson = () => {
+    if (!currentServer || !selectedServerId) return;
     if (!newMember.trim()) {
       toast({
         title: "Invalid name",
@@ -357,8 +233,9 @@ export default function Home() {
       });
       return;
     }
-    const memberToAdd = newMember.trim();
-    if (groupMembers.includes(memberToAdd)) {
+
+    const success = addMember(selectedServerId, newMember.trim());
+    if (!success) {
       toast({
         title: "Duplicate name",
         description: "This person is already in the group",
@@ -369,16 +246,6 @@ export default function Home() {
       return;
     }
 
-    const serverRef = doc(db, "servers", currentServer.id);
-    await updateDoc(serverRef, {
-      members: arrayUnion(memberToAdd)
-    });
-
-    setServers(servers.map(s =>
-      s.id === selectedServerId
-        ? { ...s, members: [...s.members, memberToAdd] }
-        : s
-    ));
     setNewMember("");
     toast({
       title: "Person added",
@@ -388,13 +255,12 @@ export default function Home() {
     });
   };
 
-  // ➕ Invite a new person
-  const invitePerson = async () => {
-    if (!currentServer || !user) return;
-    if (!newMember.trim() || !newMember.includes("@")) {
+  const handleAddDebt = () => {
+    if (!currentServer || !selectedServerId || !user) return;
+    if (!to || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       toast({
-        title: "Invalid email",
-        description: "Please enter a valid email address",
+        title: "Invalid input",
+        description: "Please select valid friends and amount",
         status: "warning",
         duration: 3000,
         isClosable: true,
@@ -402,178 +268,85 @@ export default function Home() {
       return;
     }
 
-    const invitedEmail = newMember.trim();
-
-    // Check if member is already in the server
-    if (groupMembers.includes(invitedEmail)) {
-      toast({
-        title: "Duplicate member",
-        description: "This person is already a member of this server",
-        status: "warning",
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
-    }
-
-    try {
-      const idToken = await user.getIdToken();
-
-      const tokenResponse = await fetch('/api/generate-invite-token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          invitedEmail,
-          serverId: currentServer.id,
-          serverName: currentServer.name,
-          senderName: user.displayName || user.email,
-        }),
-      });
-
-      const tokenData = await tokenResponse.json();
-
-      if (!tokenResponse.ok) {
-        throw new Error(tokenData.message || 'Failed to generate invite token');
-      }
-
-      const { inviteLink } = tokenData;
-
-      // Send actual email invitation
-      const emailResponse = await fetch('/api/send-invite', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          to: invitedEmail,
-          inviteLink,
-          serverName: currentServer.name,
-          senderName: user.displayName || user.email,
-        }),
-      });
-
-      const emailData = await emailResponse.json();
-
-      if (!emailResponse.ok) {
-        throw new Error(emailData.message || 'Failed to send invitation email');
-      }
-
-      toast({
-        title: "Invitation sent!",
-        description: `An invitation email has been sent to ${invitedEmail}. They can now join ${currentServer.name}.`,
-        status: "success",
-        duration: 5000,
-        isClosable: true,
-      });
-      setNewMember("");
-    } catch (error) {
-      console.error("Error inviting person:", error);
-      toast({
-        title: "Invitation failed",
-        description: (error as Error).message,
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-    }
-  };
-
-  // Remove a person
-  const removePerson = async (memberToRemove: string) => {
-    if (!currentServer || !user) return;
-
-    // Prevent removing the owner if they are the last member
-    if (memberToRemove === (user.displayName || user.email) && currentServer.members.length === 1) {
-      toast({
-        title: "Cannot remove owner",
-        description: "You cannot remove yourself if you are the only member. Delete the server instead.",
-        status: "warning",
-        duration: 5000,
-        isClosable: true,
-      });
-      return;
-    }
-
-    const serverRef = doc(db, "servers", currentServer.id);
-    await updateDoc(serverRef, {
-      members: arrayRemove(memberToRemove)
-    });
-
-    setServers(servers.map(s =>
-      s.id === selectedServerId
-        ? { ...s, members: s.members.filter(member => member !== memberToRemove) }
-        : s
-    ));
-    toast({
-      title: "Person removed",
-      status: "info",
-      duration: 2000,
-      isClosable: true,
-    });
-  };
-
-  // Mark a debt as paid
-  const markDebtAsPaid = async (debtIndex: number) => {
-    if (!currentServer || !user) return;
-
-    const serverRef = doc(db, "servers", currentServer.id);
-    const updatedDebts = currentServer.debts.filter((_, idx) => idx !== debtIndex);
-
-    await updateDoc(serverRef, {
-      debts: updatedDebts,
-    });
-
-    setServers(servers.map(s =>
-      s.id === selectedServerId
-        ? { ...s, debts: updatedDebts }
-        : s
-    ));
-
-    toast({
-      title: "Debt marked as paid",
-      status: "success",
-      duration: 2000,
-      isClosable: true,
-    });
-  };
-
-  // Handle a money request (approve/reject)
-  const handleMoneyRequest = async (requestId: string, status: 'approved' | 'rejected') => {
-    if (!currentServer || !user) return;
-
-    const serverRef = doc(db, "servers", currentServer.id);
-    const updatedRequests = currentServer.requests.map(req =>
-      req.id === requestId ? { ...req, status } : req
+    const success = addDebt(
+      selectedServerId,
+      user.displayName || user.email || "You",
+      to,
+      parseFloat(amount)
     );
 
-    await updateDoc(serverRef, {
-      requests: updatedRequests,
-    });
+    if (success) {
+      setTo("");
+      setAmount("");
+      toast({
+        title: "Expense added",
+        description: `Successfully recorded expense of $${parseFloat(amount).toFixed(2)}`,
+        status: "success",
+        duration: 2000,
+        isClosable: true,
+      });
+    }
+  };
 
-    setServers(servers.map(s =>
-      s.id === selectedServerId
-        ? { ...s, requests: updatedRequests }
-        : s
-    ));
 
+  const toggleBackground = () => setIsDarkMode((prev) => !prev);
+
+  // Handle payment
+  const handlePayment = async (debt: { from: string; to: string; amount: number }, index: number) => {
+    initiatePayment(debt, index);
+    onOpen();
+  };
+
+  const handleProcessPayment = async () => {
+    if (!user) return;
+
+    try {
+      if (paymentProvider === 'venmo' || paymentProvider === 'paypal') {
+        toast({
+          title: `${paymentProvider === 'venmo' ? 'Venmo' : 'PayPal'} Payment`,
+          description: `Redirecting to ${paymentProvider === 'venmo' ? 'Venmo' : 'PayPal'}...`,
+          status: 'info',
+          duration: 3000,
+        });
+      }
+
+      await processPayment(selectedServerId, user.uid, (debtIndex) => {
+        removeDebt(selectedServerId!, debtIndex);
+      });
+
+      onClose();
+      closePaymentModal();
+    } catch (error: any) {
+      console.error('Payment error:', error);
+      toast({
+        title: 'Payment failed',
+        description: error.message || 'An error occurred processing your payment',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+  };
+
+  const markDebtAsPaid = (debtIndex: number) => {
+    if (!selectedServerId) return;
+    removeDebt(selectedServerId, debtIndex);
     toast({
-      title: `Request ${status}`,
-      status: "success",
-      duration: 2000,
+      title: 'Payment successful',
+      description: 'Debt has been marked as paid',
+      status: 'success',
+      duration: 3000,
       isClosable: true,
     });
   };
 
-  // Send money request
-  const sendMoneyRequest = async () => {
+  // Create money request
+  const createRequest = () => {
     if (!currentServer || !user) return;
-    if (!requestTo.trim() || !requestAmount.trim()) {
+    if (!requestTo || !requestAmount || isNaN(parseFloat(requestAmount)) || parseFloat(requestAmount) <= 0) {
       toast({
-        title: "Missing information",
-        description: "Please enter recipient and amount",
+        title: "Invalid input",
+        description: "Please select a person and enter a valid amount",
         status: "warning",
         duration: 3000,
         isClosable: true,
@@ -583,562 +356,1133 @@ export default function Home() {
 
     const newRequest: MoneyRequest = {
       id: Date.now().toString(),
-      from: user.displayName || user.email,
-      to: requestTo.trim(),
-      amount: parseFloat(requestAmount.trim()),
+      from: user.displayName || user.email || "You",
+      to: requestTo,
+      amount: parseFloat(requestAmount),
+      description: requestDescription.trim() || undefined,
       status: 'pending',
       createdAt: Date.now(),
     };
 
-    const serverRef = doc(db, "servers", currentServer.id);
-    await updateDoc(serverRef, {
-      requests: arrayUnion(newRequest)
-    });
-
-    setServers(servers.map(s =>
-      s.id === selectedServerId
-        ? { ...s, requests: [...s.requests, newRequest] }
-        : s
-    ));
-
+    if (selectedServerId) {
+      addRequest(selectedServerId, newRequest);
+    }
     setRequestTo("");
     setRequestAmount("");
     setRequestDescription("");
+
     toast({
-      title: "Money request sent",
+      title: "Request sent",
+      description: `Request sent to ${requestTo}`,
       status: "success",
       duration: 2000,
       isClosable: true,
     });
   };
 
-  // Handle adding new debt (split bill functionality)
-  const handleAddDebt = async () => {
-    if (!currentServer || !user) return;
-    if (!to.trim() || !amount.trim()) {
-      toast({
-        title: "Missing information",
-        description: "Please enter recipient and amount",
-        status: "warning",
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
-    }
 
-    const newDebt = {
-      from: user.displayName || user.email,
-      to: to.trim(),
-      amount: parseFloat(amount.trim()),
-    };
-
-    const serverRef = doc(db, "servers", currentServer.id);
-    await updateDoc(serverRef, {
-      debts: arrayUnion(newDebt)
-    });
-
-    setServers(servers.map(s =>
-      s.id === selectedServerId
-        ? { ...s, debts: [...s.debts, newDebt] }
-        : s
-    ));
-
-    setTo("");
-    setAmount("");
+  // Reject request
+  const rejectRequest = (requestId: string) => {
+    if (!selectedServerId) return;
+    updateRequest(selectedServerId, requestId, 'rejected');
     toast({
-      title: "Debt added",
-      status: "success",
+      title: "Request rejected",
+      status: "info",
       duration: 2000,
       isClosable: true,
     });
   };
 
-  // Stripe checkout logic
-  const handleCheckout = async () => {
-    if (!selectedDebt || !currentServer || !user) return;
+  // PayPal/Venmo-inspired professional color scheme
+  const primary = "#0070BA"; // PayPal blue
+  const primaryHover = "#005EA6";
+  const primaryLight = "#E6F2FF";
+  const bgColor = useColorModeValue("#F7F9FA", "#0A0E27");
+  const cardBg = useColorModeValue("#FFFFFF", "#1A1F3A");
+  const borderColor = useColorModeValue("#E1E8ED", "#2A3454");
+  const subtleBg = useColorModeValue("#F7F9FA", "#151B35");
+  const hoverBg = useColorModeValue("#F0F4F8", "#1F2640");
 
-    setIsProcessingPayment(true);
-    try {
-      const response = await fetch('/api/create-payment-intent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: Math.round(selectedDebt.amount * 100), // amount in cents
-          serverId: currentServer.id,
-          debtIndex: selectedDebt.index,
-        }),
-      });
+  const textColor = useColorModeValue("#1C1E21", "#E4E6EB");
+  const mutedText = useColorModeValue("#65676B", "#B0B3B8");
+  const labelColor = useColorModeValue("#424242", "#CCCCCC");
 
-      const { clientSecret } = await response.json();
-
-      const stripe = await stripePromise;
-      if (!stripe) {
-        throw new Error("Stripe failed to load");
-      }
-
-      const { error } = await stripe.confirmPayment({
-        elements: stripe.elements({
-          clientSecret,
-          appearance: { theme: isDarkMode ? 'night' : 'stripe' },
-        }),
-        confirmParams: {
-          return_url: `${window.location.origin}?payment=success&debtIndex=${selectedDebt.index}`,
-        },
-      });
-
-      if (error) {
-        toast({
-          title: "Payment failed",
-          description: error.message,
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        });
-        setIsProcessingPayment(false);
-      }
-    } catch (error) {
-      console.error("Stripe checkout error:", error);
-      toast({
-        title: "Payment error",
-        description: "Failed to initiate payment. Please try again.",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-      setIsProcessingPayment(false);
-    }
-  };
-
-  // UI Components and Render Logic
-  const iconColor = useColorModeValue("gray.600", "gray.300");
-
-  const ServerCard = ({ server }: { server: Server }) => (
-    <Card
-      direction={{ base: 'column', sm: 'row' }}
-      overflow='hidden'
-      variant='outline'
-      my={2}
-      bg={selectedServerId === server.id ? useColorModeValue("blue.50", "blue.900") : useColorModeValue("white", "gray.700")}
-      onClick={() => setSelectedServerId(server.id)}
-      cursor="pointer"
-    >
-      <Stack flex="1">
-        <CardBody>
-          <HStack justifyContent="space-between">
-            <Box>
-              <Text fontWeight="bold">{server.name}</Text>
-              <Text fontSize="sm" color="gray.500">Members: {server.members.length}</Text>
-            </Box>
-            <IconButton
-              aria-label="Delete server"
-              icon={<FiTrash2 />}
-              size="sm"
-              variant="ghost"
-              colorScheme="red"
-              onClick={(e) => {
-                e.stopPropagation();
-                deleteServer(server.id);
-              }}
-            />
-          </HStack>
-        </CardBody>
-      </Stack>
-    </Card>
-  );
-
-  const MemberItem = ({ member }: { member: string }) => (
-    <HStack justifyContent="space-between" p={2} bg={useColorModeValue("gray.50", "gray.700")} borderRadius="md" mb={2}>
-      <Avatar name={member} size="sm" />
-      <Text>{member}</Text>
-      <IconButton
-        aria-label="Remove member"
-        icon={<FiX />}
-        size="sm"
-        variant="ghost"
-        colorScheme="red"
-        onClick={() => removePerson(member)}
-      />
-    </HStack>
-  );
-
-  const DebtItem = ({ debt, index }: { debt: { from: string; to: string; amount: number }, index: number }) => (
-    <Card p={3} my={2} bg={useColorModeValue("red.50", "red.900")} variant="outline">
-      <Text fontSize="sm">From: <Text as="span" fontWeight="bold">{debt.from}</Text></Text>
-      <Text fontSize="sm">To: <Text as="span" fontWeight="bold">{debt.to}</Text></Text>
-      <Text fontSize="lg" fontWeight="bold">Amount: ${debt.amount.toFixed(2)}</Text>
-      <Button
-        size="sm"
-        colorScheme="green"
-        leftIcon={<FiCheckCircle />}
-        mt={2}
-        onClick={() => setSelectedDebt({ ...debt, index })} // Set selected debt for modal
-      >
-        Mark as Paid
-      </Button>
-    </Card>
-  );
-
-  const RequestItem = ({ request }: { request: MoneyRequest }) => (
-    <Card p={3} my={2} bg={useColorModeValue("blue.50", "blue.900")} variant="outline">
-      <Text fontSize="sm">From: <Text as="span" fontWeight="bold">{request.from}</Text></Text>
-      <Text fontSize="sm">To: <Text as="span" fontWeight="bold">{request.to}</Text></Text>
-      <Text fontSize="lg" fontWeight="bold">Amount: ${request.amount.toFixed(2)}</Text>
-      <Badge colorScheme={request.status === 'pending' ? "orange" : request.status === 'approved' ? "green" : "red"} mt={2}>
-        {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
-      </Badge>
-      {request.status === 'pending' && request.to === (user?.displayName || user?.email) && (
-        <HStack mt={2}>
-          <Button size="sm" colorScheme="green" leftIcon={<FiCheck />} onClick={() => handleMoneyRequest(request.id, 'approved')}>Approve</Button>
-          <Button size="sm" colorScheme="red" leftIcon={<FiXCircle />} onClick={() => handleMoneyRequest(request.id, 'rejected')}>Reject</Button>
-        </HStack>
-      )}
-    </Card>
-  );
+  // Success/Error colors
+  const successColor = "#00A86B";
+  const errorColor = "#E53E3E";
+  const warningColor = "#FFB800";
 
   return (
-    <Flex direction="row" minH="100vh" bg={useColorModeValue("gray.100", "gray.800")}>
+    <Box minHeight="100vh" bg="gray.50" position="relative" display="flex">
       {/* Sidebar */}
-      <Box
-        as="nav"
-        pos="fixed"
-        top="0"
-        left="0"
-        zIndex="sticky"
-        h="full"
-        pb="10"
-        overflowX="hidden"
-        overflowY="auto"
-        bg={useColorModeValue("white", "gray.900")}
-        borderColor={useColorModeValue("gray.200", "gray.700")}
-        borderRightWidth="1px"
-        w={sidebarOpen ? "280px" : "80px"}
-        transition="width 0.2s ease-in-out"
-      >
-        <VStack h="full" justifyContent="space-between" p={4}>
-          <Box w="full">
-            <HStack justifyContent={sidebarOpen ? "space-between" : "center"} mb={6}>
-              {sidebarOpen && <SquareUpLogo isDark={isDarkMode} />}
-              <IconButton
-                aria-label="Toggle Sidebar"
-                icon={<FiMenu />}
-                variant="ghost"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-              />
-            </HStack>
-            {user && (
-              <Box mb={6} textAlign={sidebarOpen ? "left" : "center"}>
-                <Avatar size="md" name={user.displayName || user.email} src={user.photoURL} mb={2} mx={sidebarOpen ? "0" : "auto"} />
-                {sidebarOpen && <Text fontWeight="bold">{user.displayName || user.email}</Text>}
-                {sidebarOpen && <Text fontSize="sm" color="gray.500">UID: {user.uid}</Text>}
-              </Box>
-            )}
-
-            <Divider mb={4} />
-
-            {user && sidebarOpen && (
-              <VStack align="stretch" spacing={3}>
-                <Button
-                  leftIcon={<FiPlus />}
-                  colorScheme="blue"
-                  onClick={onOpen} // Open server creation modal
-                >
-                  Create Server
-                </Button>
-                <Heading size="sm" mt={4} mb={2}>Your Servers</Heading>
-                {servers.length === 0 ? (
-                  <Text fontSize="sm" color="gray.500">No servers yet. Create one!</Text>
-                ) : (
-                  servers.map((server) => (
-                    <ServerCard key={server.id} server={server} />
-                  ))
-                )}
-              </VStack>
-            )}
-          </Box>
-
-          <VStack w="full" spacing={3}>
-            <HStack w="full" justifyContent={sidebarOpen ? "space-between" : "center"}>
-              {sidebarOpen && <Text>Dark Mode</Text>}
-              <Switch isChecked={isDarkMode} onChange={() => setIsDarkMode(!isDarkMode)} />
-            </HStack>
-            {user ? (
-              <Button
-                w="full"
-                leftIcon={<FiLogOut />}
-                colorScheme="red"
-                onClick={handleLogout}
-              >
-                {sidebarOpen && "Logout"}
-              </Button>
-            ) : (
-              <Button
-                w="full"
-                leftIcon={<FiLogIn />}
-                colorScheme="green"
-                onClick={handleLogin}
-              >
-                {sidebarOpen && "Login with Google"}
-              </Button>
-            )}
-          </VStack>
-        </VStack>
-      </Box>
+      <Sidebar
+        servers={servers}
+        selectedServerId={selectedServerId}
+        isCreatingServer={isCreatingServer}
+        newServerName={newServerName}
+        user={user}
+        isDarkMode={isDarkMode}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        onCreateServer={handleCreateServer}
+        onCancelCreateServer={() => {
+          setIsCreatingServer(false);
+          setNewServerName("");
+        }}
+        onNewServerNameChange={setNewServerName}
+        onServerSelect={setSelectedServerId}
+        onDeleteServer={handleDeleteServer}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+        onToggleTheme={toggleBackground}
+      />
 
       {/* Main Content */}
-      <Box
-        flex="1"
-        ml={sidebarOpen ? "280px" : "80px"}
-        transition="margin-left 0.2s ease-in-out"
-        p={4}
-      >
-        {!user ? (
-          <Flex direction="column" align="center" justify="center" h="80vh">
-            <Heading mb={4}>Welcome to SquareUp</Heading>
-            <Text fontSize="lg" mb={6}>Please log in to manage your servers and debts.</Text>
-            <Button leftIcon={<FiLogIn />} colorScheme="green" onClick={handleLogin}>
-              Login with Google
-            </Button>
-          </Flex>
-        ) : (
-          <Box>
-            {currentServer ? (
-              <Box>
-                <HStack justifyContent="space-between" alignItems="center" mb={4}>
-                  <Heading size="xl">{currentServer.name}</Heading>
-                  <HStack spacing={2}>
-                    {/* Additional server actions could go here */}
-                    <Button size="sm" leftIcon={<FiSettings />}>Settings</Button>
-                  </HStack>
-                </HStack>
+      <Box flex={1} display="flex" flexDirection="column" minW={0}>
+        {/* Top Header */}
+        <Header
+          currentServer={currentServer}
+          user={user}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          onLogin={handleLogin}
+        />
 
-                <Tabs isLazy mt={6} colorScheme="blue">
-                  <TabList>
-                    <Tab><Icon as={FiDollarSign} mr={2} />Debts</Tab>
-                    <Tab><Icon as={FiUsers} mr={2} />Members</Tab>
-                    <Tab><Icon as={FiSend} mr={2} />Requests ({pendingRequestsToMe.length})</Tab>
-                    <Tab><Icon as={FiTrendingUp} mr={2} />Activity</Tab>
-                  </TabList>
-
-                  <TabPanels p={4} bg={useColorModeValue("white", "gray.700")} borderRadius="md" mt={2}>
-                    {/* Debts Tab */}
-                    <TabPanel>
-                      <Heading size="md" mb={4}>Split a Bill</Heading>
-                      <VStack as="form" onSubmit={(e) => { e.preventDefault(); handleAddDebt(); }} spacing={3} mb={6}>
-                        <Select
-                          placeholder="Who paid? (You)"
-                          value={user?.displayName || user?.email}
-                          isDisabled
-                        />
-                        <Select
-                          placeholder="Who owes you?"
-                          value={to}
-                          onChange={(e) => setTo(e.target.value)}
-                        >
-                          <option value="">Select a member</option>
-                          {groupMembers.filter(member => member !== (user?.displayName || user?.email)).map(member => (
-                            <option key={member} value={member}>{member}</option>
-                          ))}
-                        </Select>
-                        <Input
-                          placeholder="Amount"
-                          type="number"
-                          value={amount}
-                          onChange={(e) => setAmount(e.target.value)}
-                        />
-                        <Button type="submit" colorScheme="blue" leftIcon={<FiPlus />}>Add Debt</Button>
-                      </VStack>
-
-                      <Divider mb={6} />
-
-                      <Heading size="md" mb={4}>Current Debts</Heading>
-                      {debts.length === 0 ? (
-                        <Text>No outstanding debts in this server.</Text>
-                      ) : (
-                        <VStack align="stretch">
-                          {debts.map((debt, index) => (
-                            <DebtItem key={index} debt={debt} index={index} />
-                          ))}
-                        </VStack>
-                      )}
-                    </TabPanel>
-
-                    {/* Members Tab */}
-                    <TabPanel>
-                      <Heading size="md" mb={4}>Server Members</Heading>
-                      <VStack as="form" onSubmit={(e) => { e.preventDefault(); invitePerson(); }} spacing={3} mb={6}>
-                        <Input
-                          placeholder="New member email"
-                          value={newMember}
-                          onChange={(e) => setNewMember(e.target.value)}
-                          type="email"
-                        />
-                        <Button type="submit" colorScheme="blue" leftIcon={<FiSend />}>Invite Person</Button>
-                      </VStack>
-
-                      <Divider mb={6} />
-
-                      <VStack align="stretch">
-                        {groupMembers.length === 0 ? (
-                          <Text>No members yet. Invite some!</Text>
-                        ) : (
-                          groupMembers.map((member) => (
-                            <MemberItem key={member} member={member} />
-                          ))
-                        )}
-                      </VStack>
-                    </TabPanel>
-
-                    {/* Requests Tab */}
-                    <TabPanel>
-                      <Heading size="md" mb={4}>Money Requests</Heading>
-
-                      <Tabs isLazy colorScheme="green">
-                        <TabList>
-                          <Tab>Incoming ({pendingRequestsToMe.length})</Tab>
-                          <Tab>Outgoing ({myPendingRequests.length})</Tab>
-                          <Tab>All ({allRequests.length})</Tab>
-                        </TabList>
-                        <TabPanels mt={2}>
-                          <TabPanel p={0}>
-                            {pendingRequestsToMe.length === 0 ? (
-                              <Text>No pending requests to you.</Text>
-                            ) : (
-                              <VStack align="stretch" mt={4}>
-                                {pendingRequestsToMe.map((request) => (
-                                  <RequestItem key={request.id} request={request} />
-                                ))}
-                              </VStack>
-                            )}
-                          </TabPanel>
-                          <TabPanel p={0}>
-                            {myPendingRequests.length === 0 ? (
-                              <Text>No pending requests from you.</Text>
-                            ) : (
-                              <VStack align="stretch" mt={4}>
-                                {myPendingRequests.map((request) => (
-                                  <RequestItem key={request.id} request={request} />
-                                ))}
-                              </VStack>
-                            )}
-                          </TabPanel>
-                          <TabPanel p={0}>
-                            {allRequests.length === 0 ? (
-                              <Text>No requests in this server.</Text>
-                            ) : (
-                              <VStack align="stretch" mt={4}>
-                                {allRequests.map((request) => (
-                                  <RequestItem key={request.id} request={request} />
-                                ))}
-                              </VStack>
-                            )}
-                          </TabPanel>
-                        </TabPanels>
-                      </Tabs>
-
-                      <Divider my={6} />
-
-                      <Heading size="md" mb={4}>Send a Money Request</Heading>
-                      <VStack as="form" onSubmit={(e) => { e.preventDefault(); sendMoneyRequest(); }} spacing={3}>
-                        <Select
-                          placeholder="Request money from..."
-                          value={requestTo}
-                          onChange={(e) => setRequestTo(e.target.value)}
-                        >
-                          <option value="">Select a member</option>
-                          {groupMembers.filter(member => member !== (user?.displayName || user?.email)).map(member => (
-                            <option key={member} value={member}>{member}</option>
-                          ))}
-                        </Select>
-                        <Input
-                          placeholder="Amount"
-                          type="number"
-                          value={requestAmount}
-                          onChange={(e) => setRequestAmount(e.target.value)}
-                        />
-                        <Input
-                          placeholder="Description (optional)"
-                          value={requestDescription}
-                          onChange={(e) => setRequestDescription(e.target.value)}
-                        />
-                        <Button type="submit" colorScheme="blue" leftIcon={<FiSend />}>Send Request</Button>
-                      </VStack>
-                    </TabPanel>
-
-                    {/* Activity Tab */}
-                    <TabPanel>
-                      <Heading size="md" mb={4}>Recent Activity</Heading>
-                      <Text>Coming soon...</Text>
-                    </TabPanel>
-                  </TabPanels>
-                </Tabs>
+        {/* Main Content Area */}
+        <Box flex={1} overflowY="auto">
+          {!currentServer ? (
+            <Container maxW="1200px" px={{ base: 4, md: 6 }} py={{ base: 6, md: 8 }}>
+              <Box textAlign="center" py={20}>
+                <Icon as={FiServer} boxSize={16} color={mutedText} opacity={0.3} mb={4} />
+                <Text fontSize="lg" fontWeight="600" color={textColor} mb={2}>
+                  {servers.length === 0 ? "No servers yet" : "Select a server"}
+                </Text>
+                <Text fontSize="sm" color={mutedText} mb={6}>
+                  {servers.length === 0
+                    ? "Create a server from the sidebar to get started"
+                    : "Choose a server from the sidebar to manage expenses"}
+                </Text>
+                {servers.length === 0 && user && (
+                  <Button
+                    leftIcon={<Icon as={FiPlus} />}
+                    onClick={() => setIsCreatingServer(true)}
+                    bg={primary}
+                    color="black"
+                    _hover={{ bg: primaryHover }}
+                  >
+                    Create Server
+                  </Button>
+                )}
               </Box>
-            ) : (
-              <Flex direction="column" align="center" justify="center" h="80vh">
-                <Heading mb={4}>Select a Server</Heading>
-                <Text fontSize="lg" mb={6}>Please select a server from the sidebar or create a new one.</Text>
-              </Flex>
-            )}
-          </Box>
-        )}
+            </Container>
+          ) : (
+            <Container maxW="1200px" px={{ base: 4, md: 6 }} py={{ base: 8, md: 10 }}>
+              <Card
+                bg={cardBg}
+                border="1px solid"
+                borderColor={borderColor}
+                shadow="0 1px 3px rgba(0,0,0,0.1)"
+                rounded="2xl"
+                overflow="hidden"
+              >
+                <CardBody p={0}>
+                  <Tabs variant="unstyled" size="md">
+                    <TabList
+                      borderBottom="1px solid"
+                      borderColor={borderColor}
+                      px={8}
+                      pt={6}
+                      bg={cardBg}
+                    >
+                      <Tab
+                        _selected={{
+                          color: primary,
+                          borderBottom: `3px solid ${primary}`,
+                          fontWeight: "700",
+                        }}
+                        color={mutedText}
+                        fontWeight="500"
+                        fontSize="sm"
+                        px={5}
+                        py={4}
+                        mr={6}
+                        borderBottom="3px solid transparent"
+                        transition="all 0.2s"
+                        _hover={{ color: textColor }}
+                      >
+                        <HStack spacing={2.5}>
+                          <Icon as={FiDollarSign} boxSize={4.5} />
+                          <Text>Expenses</Text>
+                        </HStack>
+                      </Tab>
+                      <Tab
+                        _selected={{
+                          color: primary,
+                          borderBottom: `3px solid ${primary}`,
+                          fontWeight: "700",
+                        }}
+                        color={mutedText}
+                        fontWeight="500"
+                        fontSize="sm"
+                        px={5}
+                        py={4}
+                        mr={6}
+                        borderBottom="3px solid transparent"
+                        transition="all 0.2s"
+                        _hover={{ color: textColor }}
+                      >
+                        <HStack spacing={2.5}>
+                          <Icon as={FiTrendingUp} boxSize={4.5} />
+                          <Text>Debts</Text>
+                        </HStack>
+                      </Tab>
+                      <Tab
+                        _selected={{
+                          color: primary,
+                          borderBottom: `3px solid ${primary}`,
+                          fontWeight: "700",
+                        }}
+                        color={mutedText}
+                        fontWeight="500"
+                        fontSize="sm"
+                        px={5}
+                        py={4}
+                        mr={6}
+                        borderBottom="3px solid transparent"
+                        transition="all 0.2s"
+                        _hover={{ color: textColor }}
+                      >
+                        <HStack spacing={2.5}>
+                          <Icon as={FiUsers} boxSize={4.5} />
+                          <Text>Group</Text>
+                        </HStack>
+                      </Tab>
+                      <Tab
+                        _selected={{
+                          color: primary,
+                          borderBottom: `3px solid ${primary}`,
+                          fontWeight: "700",
+                        }}
+                        color={mutedText}
+                        fontWeight="500"
+                        fontSize="sm"
+                        px={5}
+                        py={4}
+                        borderBottom="3px solid transparent"
+                        transition="all 0.2s"
+                        _hover={{ color: textColor }}
+                      >
+                        <HStack spacing={2.5}>
+                          <Icon as={FiSend} boxSize={4.5} />
+                          <Text>Requests</Text>
+                          {pendingRequestsToMe.length > 0 && (
+                            <Badge
+                              bg={primary}
+                              color="white"
+                              fontSize="xs"
+                              rounded="full"
+                              px={2}
+                              py={0.5}
+                              fontWeight="700"
+                            >
+                              {pendingRequestsToMe.length}
+                            </Badge>
+                          )}
+                        </HStack>
+                      </Tab>
+                    </TabList>
+                    <TabPanels>
+                      {/* Add Expense Tab */}
+                      <TabPanel px={8} py={10}>
+                        <VStack spacing={8} maxW="600px" mx="auto" align="stretch">
+                          {!user ? (
+                            <Box
+                              p={12}
+                              bg={subtleBg}
+                              rounded="2xl"
+                              border="1px solid"
+                              borderColor={borderColor}
+                              textAlign="center"
+                            >
+                              <Icon as={FiLogIn} boxSize={10} color={mutedText} opacity={0.5} mb={4} />
+                              <Text fontSize="md" fontWeight="600" color={textColor} mb={2}>
+                                Sign in to add expenses
+                              </Text>
+                              <Text fontSize="sm" color={mutedText} mb={6}>
+                                Connect your Google account to get started
+                              </Text>
+                              <Button
+                                leftIcon={<Icon as={FiLogIn} />}
+                                onClick={handleLogin}
+                                bg={primary}
+                                color="white"
+                                size="lg"
+                                px={8}
+                                h="48px"
+                                fontWeight="600"
+                                fontSize="sm"
+                                rounded="xl"
+                                _hover={{ bg: primaryHover, transform: "translateY(-2px)", boxShadow: "lg" }}
+                                _active={{ transform: "translateY(0)" }}
+                                transition="all 0.2s"
+                              >
+                                Sign in with Google
+                              </Button>
+                            </Box>
+                          ) : (
+                            <Box
+                              p={5}
+                              bg={subtleBg}
+                              rounded="xl"
+                              border="1px solid"
+                              borderColor={borderColor}
+                            >
+                              <HStack spacing={4}>
+                                <Avatar
+                                  src={user?.photoURL}
+                                  name={user?.displayName}
+                                  size="md"
+                                  border={`2px solid ${borderColor}`}
+                                />
+                                <VStack align="start" spacing={0.5}>
+                                  <Text fontSize="md" color={textColor} fontWeight="600">
+                                    {user.displayName}
+                                  </Text>
+                                  <Text fontSize="xs" color={mutedText} fontWeight="400">
+                                    You're adding an expense
+                                  </Text>
+                                </VStack>
+                              </HStack>
+                            </Box>
+                          )}
+
+                          {user && currentServer && (
+                            <>
+                              <Box>
+                                <FormLabel fontSize="sm" fontWeight="600" color={textColor} mb={3}>
+                                  Who paid for this?
+                                </FormLabel>
+                                <Select
+                                  placeholder="Select a group member"
+                                  value={to}
+                                  onChange={(e) => setTo(e.target.value)}
+                                  bg={cardBg}
+                                  color={textColor}
+                                  size="lg"
+                                  h="52px"
+                                  border="2px solid"
+                                  borderColor={borderColor}
+                                  rounded="xl"
+                                  fontSize="sm"
+                                  _hover={{
+                                    borderColor: primary,
+                                  }}
+                                  _focus={{
+                                    borderColor: primary,
+                                    boxShadow: `0 0 0 3px ${primaryLight}`,
+                                  }}
+                                >
+                                  {groupMembers.length === 0 ? (
+                                    <option disabled>No group members yet</option>
+                                  ) : (
+                                    groupMembers.map((name, idx) => (
+                                      <option key={idx} value={name}>
+                                        {name}
+                                      </option>
+                                    ))
+                                  )}
+                                </Select>
+                              </Box>
+
+                              <Box>
+                                <FormLabel fontSize="sm" fontWeight="600" color={textColor} mb={3}>
+                                  Amount
+                                </FormLabel>
+                                <NumberInput
+                                  value={amount}
+                                  onChange={(valueString) => setAmount(valueString)}
+                                  precision={2}
+                                  min={0}
+                                  w="full"
+                                >
+                                  <HStack spacing={2} align="center">
+                                    <Text fontSize="2xl" fontWeight="700" color={textColor} px={1}>
+                                      $
+                                    </Text>
+                                    <NumberInputField
+                                      placeholder="0.00"
+                                      bg={cardBg}
+                                      color={textColor}
+                                      border="2px solid"
+                                      borderColor={borderColor}
+                                      rounded="xl"
+                                      h="52px"
+                                      fontSize="lg"
+                                      fontWeight="600"
+                                      _hover={{
+                                        borderColor: primary,
+                                      }}
+                                      _focus={{
+                                        borderColor: primary,
+                                        boxShadow: `0 0 0 3px ${primaryLight}`,
+                                      }}
+                                    />
+                                  </HStack>
+                                </NumberInput>
+                              </Box>
+
+                              <Button
+                                leftIcon={<Icon as={FiPlus} />}
+                                bg={primary}
+                                color="white"
+                                size="lg"
+                                width="full"
+                                fontWeight="700"
+                                fontSize="sm"
+                                h="52px"
+                                rounded="xl"
+                                _hover={{
+                                  bg: primaryHover,
+                                  transform: "translateY(-2px)",
+                                  boxShadow: "lg"
+                                }}
+                                _active={{ transform: "translateY(0)" }}
+                                onClick={handleAddDebt}
+                                isDisabled={!to || !amount || groupMembers.length === 0}
+                                transition="all 0.2s"
+                              >
+                                Add Expense
+                              </Button>
+                            </>
+                          )}
+                        </VStack>
+                      </TabPanel>
+
+                      {/* Debts Tab */}
+                      <TabPanel px={8} py={10}>
+                        <VStack spacing={5} maxW="800px" mx="auto" align="stretch">
+                          {debts.length === 0 ? (
+                            <Box
+                              textAlign="center"
+                              py={16}
+                              px={8}
+                            >
+                              <Icon
+                                as={FiTrendingUp}
+                                boxSize={12}
+                                color={mutedText}
+                                opacity={0.3}
+                                mb={4}
+                              />
+                              <Text fontSize="lg" fontWeight="600" color={textColor} mb={2}>
+                                No expenses yet
+                              </Text>
+                              <Text fontSize="sm" color={mutedText}>
+                                Add expenses in the Expenses tab to see them here
+                              </Text>
+                            </Box>
+                          ) : (
+                            <>
+                              {debts.map((d, idx) => (
+                                <Box
+                                  key={idx}
+                                  p={6}
+                                  bg={cardBg}
+                                  border="1px solid"
+                                  borderColor={borderColor}
+                                  rounded="2xl"
+                                  _hover={{
+                                    borderColor: primary,
+                                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                                    transform: "translateY(-2px)"
+                                  }}
+                                  transition="all 0.2s"
+                                >
+                                  <VStack spacing={4} align="stretch">
+                                    <HStack justify="space-between" align="start">
+                                      <VStack align="start" spacing={2} flex={1}>
+                                        <HStack spacing={3}>
+                                          <Box
+                                            w="12px"
+                                            h="12px"
+                                            bg={primary}
+                                            rounded="full"
+                                            flexShrink={0}
+                                            mt={1}
+                                          />
+                                          <VStack align="start" spacing={1}>
+                                            <Text fontSize="md" color={textColor} fontWeight="600">
+                                              {d.from} owes {d.to}
+                                            </Text>
+                                            <Text fontSize="xs" color={mutedText} fontWeight="400">
+                                              Expense #{idx + 1}
+                                            </Text>
+                                          </VStack>
+                                        </HStack>
+                                      </VStack>
+                                      <Text fontSize="2xl" fontWeight="700" color={textColor}>
+                                        ${d.amount.toFixed(2)}
+                                      </Text>
+                                    </HStack>
+                                    {user && (
+                                      <Button
+                                        leftIcon={<Icon as={FiCreditCard} />}
+                                        onClick={() => handlePayment(d, idx)}
+                                        bg={primary}
+                                        color="white"
+                                        size="md"
+                                        width="full"
+                                        fontWeight="600"
+                                        fontSize="sm"
+                                        h="48px"
+                                        rounded="xl"
+                                        _hover={{
+                                          bg: primaryHover,
+                                          transform: "translateY(-2px)",
+                                          boxShadow: "lg"
+                                        }}
+                                        _active={{ transform: "translateY(0)" }}
+                                        transition="all 0.2s"
+                                      >
+                                        Pay Now
+                                      </Button>
+                                    )}
+                                  </VStack>
+                                </Box>
+                              ))}
+
+                              <Divider borderColor={borderColor} my={2} />
+
+                              <Button
+                                leftIcon={<Icon as={FiCheckCircle} />}
+                                bg={primary}
+                                color="white"
+                                size="lg"
+                                width="full"
+                                fontWeight="700"
+                                fontSize="sm"
+                                h="52px"
+                                rounded="xl"
+                                _hover={{
+                                  bg: primaryHover,
+                                  transform: "translateY(-2px)",
+                                  boxShadow: "lg"
+                                }}
+                                _active={{ transform: "translateY(0)" }}
+                                onClick={() => selectedServerId && simplifyDebts(selectedServerId)}
+                                transition="all 0.2s"
+                              >
+                                Simplify All Debts
+                              </Button>
+                            </>
+                          )}
+                        </VStack>
+                      </TabPanel>
+
+                      {/* Add People Tab */}
+                      <TabPanel px={6} py={8}>
+                        {user ? (
+                          <VStack spacing={6} maxW="700px" mx="auto" align="stretch">
+                            <Box>
+                              <FormLabel
+                                fontSize="xs"
+                                fontWeight="600"
+                                color={labelColor}
+                                mb={2}
+                                textTransform="uppercase"
+                                letterSpacing="0.05em"
+                              >
+                                Add Member
+                              </FormLabel>
+                              <HStack spacing={2}>
+                                <Input
+                                  placeholder="Enter name"
+                                  value={newMember}
+                                  onChange={(e) => setNewMember(e.target.value)}
+                                  onKeyPress={(e) => {
+                                    if (e.key === "Enter") {
+                                      handleAddPerson();
+                                    }
+                                  }}
+                                  bg={cardBg}
+                                  color={textColor}
+                                  size="md"
+                                  border="1px solid"
+                                  borderColor={borderColor}
+                                  _hover={{
+                                    borderColor: primary,
+                                  }}
+                                  _focus={{
+                                    borderColor: primary,
+                                    boxShadow: `0 0 0 1px ${primary}`,
+                                  }}
+                                />
+                                <Button
+                                  leftIcon={<Icon as={FiPlus} />}
+                                  bg={primary}
+                                  color="black"
+                                  size="md"
+                                  px={6}
+                                  fontWeight="500"
+                                  _hover={{
+                                    bg: primaryHover,
+                                  }}
+                                  onClick={handleAddPerson}
+                                  isDisabled={!newMember.trim()}
+                                >
+                                  Add
+                                </Button>
+                              </HStack>
+                            </Box>
+
+                            {groupMembers.length > 0 && (
+                              <>
+                                <Divider borderColor={borderColor} />
+                                <Box>
+                                  <Text fontSize="sm" fontWeight="600" color={textColor} mb={4}>
+                                    Group Members ({groupMembers.length})
+                                  </Text>
+                                  <VStack spacing={3} align="stretch">
+                                    {groupMembers.map((name, idx) => (
+                                      <HStack
+                                        key={idx}
+                                        spacing={4}
+                                        p={4}
+                                        bg={subtleBg}
+                                        rounded="xl"
+                                        border="1px solid"
+                                        borderColor={borderColor}
+                                        _hover={{
+                                          bg: hoverBg,
+                                          borderColor: primary,
+                                          transform: "translateX(4px)"
+                                        }}
+                                        transition="all 0.2s"
+                                      >
+                                        <Avatar
+                                          name={name}
+                                          bg={primary}
+                                          color="white"
+                                          size="md"
+                                          fontWeight="700"
+                                        />
+                                        <Text fontSize="md" fontWeight="600" color={textColor}>
+                                          {name}
+                                        </Text>
+                                      </HStack>
+                                    ))}
+                                  </VStack>
+                                </Box>
+                              </>
+                            )}
+
+                            {groupMembers.length === 0 && (
+                              <Box
+                                textAlign="center"
+                                py={12}
+                                px={8}
+                                bg={subtleBg}
+                                rounded="2xl"
+                                border="2px dashed"
+                                borderColor={borderColor}
+                              >
+                                <Icon
+                                  as={FiUsers}
+                                  boxSize={10}
+                                  color={mutedText}
+                                  opacity={0.3}
+                                  mb={4}
+                                />
+                                <Text fontSize="md" fontWeight="600" color={textColor} mb={2}>
+                                  No members yet
+                                </Text>
+                                <Text fontSize="sm" color={mutedText}>
+                                  Add your first group member above
+                                </Text>
+                              </Box>
+                            )}
+                          </VStack>
+                        ) : (
+                          <Box
+                            textAlign="center"
+                            py={16}
+                            px={8}
+                            maxW="500px"
+                            mx="auto"
+                          >
+                            <Icon
+                              as={FiLogIn}
+                              boxSize={12}
+                              color={mutedText}
+                              opacity={0.3}
+                              mb={4}
+                            />
+                            <Text fontSize="lg" fontWeight="600" color={textColor} mb={2}>
+                              Sign in required
+                            </Text>
+                            <Text fontSize="sm" color={mutedText} mb={8}>
+                              Please sign in to manage group members
+                            </Text>
+                            <Button
+                              leftIcon={<Icon as={FiLogIn} />}
+                              onClick={handleLogin}
+                              bg={primary}
+                              color="white"
+                              size="lg"
+                              px={8}
+                              h="52px"
+                              fontWeight="700"
+                              fontSize="sm"
+                              rounded="xl"
+                              _hover={{
+                                bg: primaryHover,
+                                transform: "translateY(-2px)",
+                                boxShadow: "lg"
+                              }}
+                              _active={{ transform: "translateY(0)" }}
+                              transition="all 0.2s"
+                            >
+                              Sign in with Google
+                            </Button>
+                          </Box>
+                        )}
+                      </TabPanel>
+
+                      {/* Requests Tab */}
+                      <TabPanel px={8} py={10}>
+                        {user ? (
+                          <VStack spacing={8} maxW="800px" mx="auto" align="stretch">
+                            {/* Create Request Section */}
+                            <Box
+                              p={8}
+                              bg={subtleBg}
+                              rounded="2xl"
+                              border="1px solid"
+                              borderColor={borderColor}
+                            >
+                              <VStack spacing={6} align="stretch">
+                                <VStack align="start" spacing={1}>
+                                  <Text fontSize="lg" fontWeight="700" color={textColor}>
+                                    Request Money
+                                  </Text>
+                                  <Text fontSize="sm" color={mutedText}>
+                                    Send a payment request to a group member
+                                  </Text>
+                                </VStack>
+
+                                <Box>
+                                  <FormLabel fontSize="sm" fontWeight="600" color={textColor} mb={3}>
+                                    Request from
+                                  </FormLabel>
+                                  <Select
+                                    placeholder="Select a group member"
+                                    value={requestTo}
+                                    onChange={(e) => setRequestTo(e.target.value)}
+                                    bg={cardBg}
+                                    color={textColor}
+                                    size="lg"
+                                    h="52px"
+                                    border="2px solid"
+                                    borderColor={borderColor}
+                                    rounded="xl"
+                                    fontSize="sm"
+                                    _hover={{ borderColor: primary }}
+                                    _focus={{ borderColor: primary, boxShadow: `0 0 0 3px ${primaryLight}` }}
+                                  >
+                                    {groupMembers
+                                      .filter(name => name !== (user?.displayName || user?.email))
+                                      .map((name, idx) => (
+                                        <option key={idx} value={name}>
+                                          {name}
+                                        </option>
+                                      ))}
+                                  </Select>
+                                </Box>
+
+                                <Box>
+                                  <FormLabel fontSize="sm" fontWeight="600" color={textColor} mb={3}>
+                                    Amount
+                                  </FormLabel>
+                                  <NumberInput
+                                    value={requestAmount}
+                                    onChange={(valueString) => setRequestAmount(valueString)}
+                                    precision={2}
+                                    min={0}
+                                    w="full"
+                                  >
+                                    <HStack spacing={2} align="center">
+                                      <Text fontSize="2xl" fontWeight="700" color={textColor} px={1}>
+                                        $
+                                      </Text>
+                                      <NumberInputField
+                                        placeholder="0.00"
+                                        bg={cardBg}
+                                        color={textColor}
+                                        border="2px solid"
+                                        borderColor={borderColor}
+                                        rounded="xl"
+                                        h="52px"
+                                        fontSize="lg"
+                                        fontWeight="600"
+                                        _hover={{ borderColor: primary }}
+                                        _focus={{ borderColor: primary, boxShadow: `0 0 0 3px ${primaryLight}` }}
+                                      />
+                                    </HStack>
+                                  </NumberInput>
+                                </Box>
+
+                                <Box>
+                                  <FormLabel fontSize="sm" fontWeight="600" color={textColor} mb={3}>
+                                    Description <Text as="span" color={mutedText} fontWeight="400">(optional)</Text>
+                                  </FormLabel>
+                                  <Input
+                                    placeholder="What is this request for?"
+                                    value={requestDescription}
+                                    onChange={(e) => setRequestDescription(e.target.value)}
+                                    bg={cardBg}
+                                    color={textColor}
+                                    size="lg"
+                                    h="52px"
+                                    border="2px solid"
+                                    borderColor={borderColor}
+                                    rounded="xl"
+                                    fontSize="sm"
+                                    _hover={{ borderColor: primary }}
+                                    _focus={{ borderColor: primary, boxShadow: `0 0 0 3px ${primaryLight}` }}
+                                  />
+                                </Box>
+
+                                <Button
+                                  leftIcon={<Icon as={FiSend} />}
+                                  bg={primary}
+                                  color="white"
+                                  size="lg"
+                                  width="full"
+                                  fontWeight="700"
+                                  fontSize="sm"
+                                  h="52px"
+                                  rounded="xl"
+                                  _hover={{
+                                    bg: primaryHover,
+                                    transform: "translateY(-2px)",
+                                    boxShadow: "lg"
+                                  }}
+                                  _active={{ transform: "translateY(0)" }}
+                                  onClick={createRequest}
+                                  isDisabled={!requestTo || !requestAmount || groupMembers.length === 0}
+                                  transition="all 0.2s"
+                                >
+                                  Send Request
+                                </Button>
+                              </VStack>
+                            </Box>
+
+                            <Divider borderColor={borderColor} />
+
+                            {/* Pending Requests to Me */}
+                            {pendingRequestsToMe.length > 0 && (
+                              <Box>
+                                <Text fontSize="md" fontWeight="700" color={textColor} mb={5}>
+                                  Pending Requests ({pendingRequestsToMe.length})
+                                </Text>
+                                <VStack spacing={4} align="stretch">
+                                  {pendingRequestsToMe.map((request) => (
+                                    <Box
+                                      key={request.id}
+                                      p={6}
+                                      bg={cardBg}
+                                      border="2px solid"
+                                      borderColor={primary}
+                                      rounded="2xl"
+                                      boxShadow="0 2px 8px rgba(0,112,186,0.1)"
+                                    >
+                                      <VStack spacing={4} align="stretch">
+                                        <HStack justify="space-between" align="start">
+                                          <VStack align="start" spacing={2} flex={1}>
+                                            <Text fontSize="lg" fontWeight="700" color={textColor}>
+                                              {request.from} requests ${request.amount.toFixed(2)}
+                                            </Text>
+                                            {request.description && (
+                                              <Text fontSize="sm" color={mutedText} fontWeight="400">
+                                                {request.description}
+                                              </Text>
+                                            )}
+                                          </VStack>
+                                          <Badge
+                                            bg={primary}
+                                            color="white"
+                                            fontSize="xs"
+                                            px={3}
+                                            py={1.5}
+                                            fontWeight="700"
+                                            rounded="full"
+                                          >
+                                            Pending
+                                          </Badge>
+                                        </HStack>
+                                        <HStack spacing={3}>
+                                          <Button
+                                            leftIcon={<Icon as={FiCheck} />}
+                                            onClick={() => selectedServerId && approveRequest(selectedServerId, request.id)}
+                                            bg={successColor}
+                                            color="white"
+                                            size="md"
+                                            flex={1}
+                                            fontWeight="700"
+                                            fontSize="sm"
+                                            h="48px"
+                                            rounded="xl"
+                                            _hover={{
+                                              bg: "#008A5A",
+                                              transform: "translateY(-2px)",
+                                              boxShadow: "lg"
+                                            }}
+                                            _active={{ transform: "translateY(0)" }}
+                                            transition="all 0.2s"
+                                          >
+                                            Approve
+                                          </Button>
+                                          <Button
+                                            leftIcon={<Icon as={FiXCircle} />}
+                                            onClick={() => rejectRequest(request.id)}
+                                            variant="outline"
+                                            size="md"
+                                            flex={1}
+                                            borderColor={borderColor}
+                                            color={textColor}
+                                            fontWeight="600"
+                                            fontSize="sm"
+                                            h="48px"
+                                            rounded="xl"
+                                            _hover={{
+                                              bg: hoverBg,
+                                              borderColor: errorColor,
+                                              color: errorColor
+                                            }}
+                                            transition="all 0.2s"
+                                          >
+                                            Reject
+                                          </Button>
+                                        </HStack>
+                                      </VStack>
+                                    </Box>
+                                  ))}
+                                </VStack>
+                              </Box>
+                            )}
+
+                            {/* My Pending Requests */}
+                            {myPendingRequests.length > 0 && (
+                              <Box>
+                                <Text fontSize="md" fontWeight="700" color={textColor} mb={5}>
+                                  My Pending Requests ({myPendingRequests.length})
+                                </Text>
+                                <VStack spacing={3} align="stretch">
+                                  {myPendingRequests.map((request) => (
+                                    <Box
+                                      key={request.id}
+                                      p={5}
+                                      bg={subtleBg}
+                                      border="1px solid"
+                                      borderColor={borderColor}
+                                      rounded="xl"
+                                      _hover={{
+                                        bg: hoverBg,
+                                        borderColor: primary
+                                      }}
+                                      transition="all 0.2s"
+                                    >
+                                      <HStack justify="space-between" align="center">
+                                        <VStack align="start" spacing={1} flex={1}>
+                                          <Text fontSize="md" fontWeight="600" color={textColor}>
+                                            Request to {request.to}: ${request.amount.toFixed(2)}
+                                          </Text>
+                                          {request.description && (
+                                            <Text fontSize="sm" color={mutedText} fontWeight="400">
+                                              {request.description}
+                                            </Text>
+                                          )}
+                                        </VStack>
+                                        <Badge
+                                          bg={warningColor}
+                                          color="white"
+                                          fontSize="xs"
+                                          px={3}
+                                          py={1.5}
+                                          fontWeight="700"
+                                          rounded="full"
+                                        >
+                                          Waiting
+                                        </Badge>
+                                      </HStack>
+                                    </Box>
+                                  ))}
+                                </VStack>
+                              </Box>
+                            )}
+
+                            {/* All Requests History */}
+                            {allRequests.length > 0 && (
+                              <>
+                                <Divider borderColor={borderColor} my={2} />
+                                <Box>
+                                  <Text fontSize="md" fontWeight="700" color={textColor} mb={5}>
+                                    Request History
+                                  </Text>
+                                  <VStack spacing={3} align="stretch">
+                                    {allRequests
+                                      .sort((a, b) => b.createdAt - a.createdAt)
+                                      .map((request) => (
+                                        <Box
+                                          key={request.id}
+                                          p={5}
+                                          bg={cardBg}
+                                          border="1px solid"
+                                          borderColor={borderColor}
+                                          rounded="xl"
+                                          opacity={request.status !== 'pending' ? 0.6 : 1}
+                                          _hover={{
+                                            opacity: 1,
+                                            borderColor: primary,
+                                            transform: "translateX(4px)"
+                                          }}
+                                          transition="all 0.2s"
+                                        >
+                                          <HStack justify="space-between" align="center">
+                                            <VStack align="start" spacing={1} flex={1}>
+                                              <Text fontSize="md" fontWeight="600" color={textColor}>
+                                                {request.from} → {request.to}: ${request.amount.toFixed(2)}
+                                              </Text>
+                                              {request.description && (
+                                                <Text fontSize="sm" color={mutedText} fontWeight="400">
+                                                  {request.description}
+                                                </Text>
+                                              )}
+                                            </VStack>
+                                            <Badge
+                                              bg={
+                                                request.status === 'approved' ? successColor :
+                                                  request.status === 'rejected' ? errorColor :
+                                                    warningColor
+                                              }
+                                              color="white"
+                                              fontSize="xs"
+                                              px={3}
+                                              py={1.5}
+                                              fontWeight="700"
+                                              rounded="full"
+                                            >
+                                              {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                                            </Badge>
+                                          </HStack>
+                                        </Box>
+                                      ))}
+                                  </VStack>
+                                </Box>
+                              </>
+                            )}
+
+                            {/* Empty State */}
+                            {allRequests.length === 0 && (
+                              <Box textAlign="center" py={16} px={8}>
+                                <Icon as={FiSend} boxSize={12} color={mutedText} opacity={0.3} mb={4} />
+                                <Text fontSize="lg" fontWeight="600" color={textColor} mb={2}>
+                                  No requests yet
+                                </Text>
+                                <Text fontSize="sm" color={mutedText}>
+                                  Create a request above to get started
+                                </Text>
+                              </Box>
+                            )}
+                          </VStack>
+                        ) : (
+                          <Box textAlign="center" py={16} px={8} maxW="500px" mx="auto">
+                            <Icon as={FiLogIn} boxSize={12} color={mutedText} opacity={0.3} mb={4} />
+                            <Text fontSize="lg" fontWeight="600" color={textColor} mb={2}>
+                              Sign in required
+                            </Text>
+                            <Text fontSize="sm" color={mutedText} mb={8}>
+                              Please sign in to manage requests
+                            </Text>
+                            <Button
+                              leftIcon={<Icon as={FiLogIn} />}
+                              onClick={handleLogin}
+                              bg={primary}
+                              color="white"
+                              size="lg"
+                              px={8}
+                              h="52px"
+                              fontWeight="700"
+                              fontSize="sm"
+                              rounded="xl"
+                              _hover={{
+                                bg: primaryHover,
+                                transform: "translateY(-2px)",
+                                boxShadow: "lg"
+                              }}
+                              _active={{ transform: "translateY(0)" }}
+                              transition="all 0.2s"
+                            >
+                              Sign in with Google
+                            </Button>
+                          </Box>
+                        )}
+                      </TabPanel>
+                    </TabPanels>
+                  </Tabs>
+                </CardBody>
+
+                {/* Professional Footer */}
+                <CardFooter
+                  flexDirection="column"
+                  alignItems="center"
+                  gap={5}
+                  pt={8}
+                  pb={8}
+                  bg={subtleBg}
+                  borderTop="1px solid"
+                  borderColor={borderColor}
+                >
+                  <HStack spacing={6} flexWrap="wrap" justify="center">
+                    {["Kavin", "Nikhil", "Palash", "Rohit"].map((name, idx) => (
+                      <HStack key={idx} spacing={2.5}>
+                        <Avatar
+                          name={name}
+                          bg={primary}
+                          color="white"
+                          size="md"
+                          fontWeight="700"
+                          border={`2px solid ${borderColor}`}
+                        />
+                        <Text fontSize="sm" fontWeight="500" color={textColor}>
+                          {name}
+                        </Text>
+                      </HStack>
+                    ))}
+                  </HStack>
+                  <Text fontSize="xs" color={mutedText} fontWeight="400">
+                    SquareUp © 2024 · Expense Management Platform
+                  </Text>
+                </CardFooter>
+              </Card>
+            </Container>
+          )}
+        </Box>
       </Box>
 
-      {/* Create Server Modal */}
-      <Modal isOpen={isOpen} onClose={onClose}>
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>Create New Server</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody>
-            <Input
-              placeholder="Server Name"
-              value={newServerName}
-              onChange={(e) => setNewServerName(e.target.value)}
-            />
-          </ModalBody>
-
-          <ModalFooter>
-            <Button variant="ghost" mr={3} onClick={onClose}>Cancel</Button>
-            <Button colorScheme="blue" onClick={() => { createServer(); onClose(); }}>Create</Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
-
-      {/* Payment Confirmation Modal */}
-      <Modal isOpen={!!selectedDebt} onClose={() => setSelectedDebt(null)}>
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>Confirm Payment</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody>
-            {selectedDebt && (
-              <Box>
-                <Text>You are about to pay <Text as="span" fontWeight="bold">${selectedDebt.amount.toFixed(2)}</Text> to <Text as="span" fontWeight="bold">{selectedDebt.to}</Text>.</Text>
-                <Text mt={2}>How would you like to pay?</Text>
-                <RadioGroup onChange={setPaymentProvider} value={paymentProvider} mt={2}>
-                  <Stack direction="row">
-                    <Radio value="stripe">Stripe</Radio>
-                    {/* <Radio value="paypal">PayPal</Radio> */}
-                  </Stack>
-                </RadioGroup>
-              </Box>
-            )}
-          </ModalBody>
-          <ModalFooter>
-            <Button variant="ghost" mr={3} onClick={() => setSelectedDebt(null)}>Cancel</Button>
-            <Button
-              colorScheme="blue"
-              onClick={handleCheckout}
-              isLoading={isProcessingPayment}
-              loadingText="Processing..."
-              isDisabled={paymentProvider !== 'stripe'}
-            >
-              Pay with {paymentProvider.charAt(0).toUpperCase() + paymentProvider.slice(1)}
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
-    </Flex>
+      {/* Payment Modal */}
+      <PaymentModal
+        isOpen={isOpen}
+        onClose={() => {
+          onClose();
+          closePaymentModal();
+        }}
+        selectedDebt={selectedDebt}
+        paymentProvider={paymentProvider}
+        isProcessingPayment={isProcessingPayment}
+        onPaymentProviderChange={setPaymentProvider}
+        onProcessPayment={handleProcessPayment}
+      />
+    </Box>
   );
-}
+} // make it so when i add people to groups, i actually add them to the group rather than just typing in a name. basically i invite them through an inivte link to that specific group. this way it actually works across multiple people. also, the icons are too small next to group, debts, etcs. make them bigger
