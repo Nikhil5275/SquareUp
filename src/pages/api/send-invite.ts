@@ -65,7 +65,7 @@ const sendInviteEmail = async ({ to, inviteLink, serverName, senderName }: SendI
       <p>This is a test invitation email from SquareUp.</p>
       <p>Invite link: <a href="${inviteLink}">${inviteLink}</a></p>
     `,
-    text: hasProperConfig ? `
+        text: hasProperConfig ? `
 🎉 You're Invited to "${serverName}"!
 
 ${senderName} has invited you to join the "${serverName}" group on SquareUp!
