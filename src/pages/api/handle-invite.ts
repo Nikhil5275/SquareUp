@@ -18,12 +18,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 });
             }
 
-      const inviteRef = adminDb.collection("invitations").doc(token);
-      const inviteSnap = await inviteRef.get();
+            const inviteRef = adminDb.collection("invitations").doc(token);
+            const inviteSnap = await inviteRef.get();
 
-      if (!inviteSnap.exists) {
-        return res.status(404).json({ message: 'Invitation not found or invalid.' });
-      }
+            if (!inviteSnap.exists) {
+                return res.status(404).json({ message: 'Invitation not found or invalid.' });
+            }
 
             const inviteData = inviteSnap.data();
 
@@ -44,33 +44,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 return res.status(403).json({ message: 'You must log in with the invited email address to accept this invitation.' });
             }
 
-      const serverRef = adminDb.collection("servers").doc(inviteData.serverId);
-      const serverSnap = await serverRef.get();
+            const serverRef = adminDb.collection("servers").doc(inviteData.serverId);
+            const serverSnap = await serverRef.get();
 
-      if (!serverSnap.exists) {
-        return res.status(404).json({ message: 'Server not found.' });
-      }
+            if (!serverSnap.exists) {
+                return res.status(404).json({ message: 'Server not found.' });
+            }
 
-      const serverData = serverSnap.data();
-      if (!serverData) {
-        return res.status(404).json({ message: 'Server data not found.' });
-      }
+            const serverData = serverSnap.data();
+            if (!serverData) {
+                return res.status(404).json({ message: 'Server data not found.' });
+            }
 
-      if (serverData.members?.includes(userEmail)) {
-        // User is already a member, just mark invite as used and redirect
-        await inviteRef.update({ used: true });
-        return res.status(200).json({ message: 'You are already a member of this server.', serverName: serverData.name });
-      }
+            if (serverData.members?.includes(userEmail)) {
+                // User is already a member, just mark invite as used and redirect
+                await inviteRef.update({ used: true });
+                return res.status(200).json({ message: 'You are already a member of this server.', serverName: serverData.name });
+            }
 
-      // Add member to the server
-      await serverRef.update({
-        members: [...(serverData.members || []), userEmail],
-      });
+            // Add member to the server
+            await serverRef.update({
+                members: [...(serverData.members || []), userEmail],
+            });
 
-      // Mark invitation as used
-      await inviteRef.update({ used: true });
+            // Mark invitation as used
+            await inviteRef.update({ used: true });
 
-      res.status(200).json({ message: 'Successfully joined server', serverName: serverData.name });
+            res.status(200).json({ message: 'Successfully joined server', serverName: serverData.name });
 
         } catch (error) {
             console.error('Error handling invite:', error);

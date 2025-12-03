@@ -30,18 +30,61 @@ const sendInviteEmail = async ({ to, inviteLink, serverName, senderName }: SendI
         to,
         subject: hasProperConfig ? `You're invited to join ${serverName} on SquareUp!` : 'Test',
         html: hasProperConfig ? `
-      <p>Hello,</p>
-      <p><b>${senderName}</b> has invited you to join the <b>${serverName}</b> community on SquareUp!</p>
-      <p>SquareUp is an expense management app that helps groups track and split expenses fairly.</p>
-      <p>To get started, please click on the link below:</p>
-      <p><a href="${inviteLink}" style="background-color: #0070BA; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0;">Join SquareUp</a></p>
-      <p>This will take you to our app where you can create your own expense groups and start managing shared costs with friends and family.</p>
-      <p>Welcome to the community! 🎉</p>
-      <p>The SquareUp Team</p>
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+        <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <h1 style="color: #0070BA; text-align: center; margin-bottom: 20px;">🎉 You're Invited!</h1>
+          <p style="font-size: 16px; line-height: 1.6;">Hello,</p>
+          <p style="font-size: 16px; line-height: 1.6;"><b>${senderName}</b> has invited you to join the <b>"${serverName}"</b> group on SquareUp!</p>
+          <p style="font-size: 16px; line-height: 1.6;">SquareUp is an expense management app that helps groups track and split expenses fairly with friends and family.</p>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${inviteLink}"
+               style="background-color: #0070BA; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 12px rgba(0,112,186,0.3);">
+              🚀 Join "${serverName}"
+            </a>
+          </div>
+
+          <div style="background-color: #f0f8ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="color: #0070BA; margin-top: 0;">What happens when you join?</h3>
+            <ul style="color: #333; padding-left: 20px;">
+              <li>A personal server called "${serverName}" will be created for you</li>
+              <li>You can track expenses and split costs with group members</li>
+              <li>You can invite others to join your expense groups</li>
+              <li>Access to all SquareUp features for managing shared expenses</li>
+            </ul>
+          </div>
+
+          <p style="font-size: 14px; color: #666; text-align: center; margin-top: 30px;">
+            Welcome to the SquareUp community! 🎉<br>
+            <small>The SquareUp Team</small>
+          </p>
+        </div>
+      </div>
     ` : `
       <p>Hello,</p>
       <p>This is a test invitation email from SquareUp.</p>
       <p>Invite link: <a href="${inviteLink}">${inviteLink}</a></p>
+    `,
+    text: hasProperConfig ? `
+🎉 You're Invited to "${serverName}"!
+
+${senderName} has invited you to join the "${serverName}" group on SquareUp!
+
+SquareUp helps groups track and split expenses fairly with friends and family.
+
+When you join, you'll get:
+- A personal server called "${serverName}"
+- Tools to track expenses and split costs
+- Ability to invite others to join
+
+Click here to join: ${inviteLink}
+
+Welcome to the community! 🎉
+
+The SquareUp Team
+    ` : `
+This is a test invitation email from SquareUp.
+Invite link: ${inviteLink}
     `,
     };
 

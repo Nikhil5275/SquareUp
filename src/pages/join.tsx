@@ -49,16 +49,54 @@ export default function JoinServerPage() {
         setLoading(true);
         setError(null);
         try {
-            // For the current localStorage-based system, we can't actually add users to shared servers
-            // Each user has their own isolated servers. In a real app, this would add them to a shared server
+            // Create a server for the new user based on the invitation
+            const serverName = server as string || 'Invited Group';
+            const userId = currentUser.uid;
+
+            // Check if user already has servers
+            const existingServers = JSON.parse(localStorage.getItem(`servers_${userId}`) || '[]');
+
+            // Check if they already have a server with this name
+            const existingServer = existingServers.find((s: any) => s.name === serverName);
+
+            if (!existingServer) {
+                // Create a new server for the invited user
+                const newServer = {
+                    id: Date.now().toString(),
+                    name: serverName,
+                    members: [currentUser.displayName || currentUser.email || 'You'],
+                    debts: [],
+                    requests: [],
+                    createdAt: Date.now(),
+                };
+
+                // Add some sample data to make it feel like a real group
+                if (serverName !== 'Invited Group') {
+                    // Add a welcome debt to show how the system works
+                    newServer.debts = [{
+                        from: 'System',
+                        to: currentUser.displayName || currentUser.email || 'You',
+                        amount: 0,
+                    }];
+                }
+
+                existingServers.push(newServer);
+                localStorage.setItem(`servers_${userId}`, JSON.stringify(existingServers));
+            }
+
             toast({
-                title: "Welcome to SquareUp!",
-                description: `Thanks for accepting the invitation to ${server || 'our community'}! You can now create your own servers and invite others.`,
+                title: `🎉 Successfully joined "${serverName}"!`,
+                description: `A new server has been created for you. You can now track expenses, add group members, and invite others to join!`,
                 status: "success",
-                duration: 5000,
+                duration: 6000,
                 isClosable: true,
             });
-            router.push('/'); // Redirect to home page where they can create their own servers
+
+            // Small delay to show the success message before redirecting
+            setTimeout(() => {
+                router.push('/'); // Redirect to home page with their new server
+            }, 1000);
+
         } catch (err) {
             console.error("Error joining server:", err);
             setError((err as Error).message || 'Failed to join server');
