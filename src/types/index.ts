@@ -15,6 +15,8 @@ export interface Server {
     debts: { from: string; to: string; amount: number }[];
     requests: MoneyRequest[];
     createdAt: number;
+    createdBy: string; // UID of the user who created the server
+    memberIds: string[]; // Array of user UIDs who have access
 }
 
 export interface Debt {

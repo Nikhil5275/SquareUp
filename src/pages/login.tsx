@@ -1,11 +1,15 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { Box, Heading, Text, Button, VStack } from '@chakra-ui/react';
+import { Box, Heading, Text, Button, VStack, useColorModeValue } from '@chakra-ui/react';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "firebase/auth";
 import { auth, provider } from "../firebase";
 
 export default function LoginPage() {
   const router = useRouter();
+
+  const bgColor = useColorModeValue("gray.50", "gray.900");
+  const textColor = useColorModeValue("gray.900", "gray.100");
+  const mutedText = useColorModeValue("gray.600", "gray.400");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -28,13 +32,13 @@ export default function LoginPage() {
   };
 
   return (
-    <Box minH="100vh" bg="gray.50" display="flex" alignItems="center" justifyContent="center">
+    <Box minH="100vh" bg={bgColor} display="flex" alignItems="center" justifyContent="center">
       <VStack spacing={8} textAlign="center">
         <Box>
-          <Heading size="xl" mb={4} color="gray.900">
+          <Heading size="xl" mb={4} color={textColor}>
             Welcome to SquareUp
           </Heading>
-          <Text fontSize="lg" color="gray.600" mb={6}>
+          <Text fontSize="lg" color={mutedText} mb={6}>
             Sign in to manage your expenses and split costs with friends
           </Text>
         </Box>

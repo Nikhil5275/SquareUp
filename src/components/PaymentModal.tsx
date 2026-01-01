@@ -14,6 +14,7 @@ import {
     Radio,
     Icon,
     Text,
+    useColorModeValue,
 } from "@chakra-ui/react";
 import { FiCreditCard, FiZap } from "react-icons/fi";
 import { Debt } from "../types";
@@ -37,14 +38,14 @@ export const PaymentModal = ({
     onPaymentProviderChange,
     onProcessPayment,
 }: PaymentModalProps) => {
-    const cardBg = "white";
-    const borderColor = "gray.200";
-    const primary = "#0070BA";
-    const primaryLight = "#E6F2FF";
-    const textColor = "gray.900";
-    const mutedText = "gray.600";
-    const hoverBg = "gray.100";
-    const subtleBg = "gray.50";
+    const cardBg = useColorModeValue("white", "gray.800");
+    const borderColor = useColorModeValue("gray.200", "gray.600");
+    const primary = "#4A7C59"; // Muted sage green
+    const primaryLight = "#E8F5E8";
+    const textColor = useColorModeValue("gray.900", "gray.100");
+    const mutedText = useColorModeValue("gray.600", "gray.400");
+    const hoverBg = useColorModeValue("gray.100", "gray.600");
+    const subtleBg = useColorModeValue("gray.50", "gray.700");
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} size="lg" isCentered>
@@ -116,7 +117,7 @@ export const PaymentModal = ({
                                             }}
                                             transition="all 0.2s"
                                         >
-                                            <Radio value="stripe" colorScheme="blue" size="lg">
+                                            <Radio value="stripe" colorScheme="green" size="lg">
                                                 <HStack spacing={3} ml={3}>
                                                     <Icon as={FiCreditCard} boxSize={5} color={paymentProvider === 'stripe' ? primary : mutedText} />
                                                     <VStack align="start" spacing={0}>
@@ -144,7 +145,7 @@ export const PaymentModal = ({
                                             }}
                                             transition="all 0.2s"
                                         >
-                                            <Radio value="venmo" colorScheme="blue" size="lg">
+                                            <Radio value="venmo" colorScheme="green" size="lg">
                                                 <HStack spacing={3} ml={3}>
                                                     <Icon as={FiZap} boxSize={5} color={paymentProvider === 'venmo' ? primary : mutedText} />
                                                     <VStack align="start" spacing={0}>
@@ -153,34 +154,6 @@ export const PaymentModal = ({
                                                         </Text>
                                                         <Text fontSize="xs" color={mutedText} fontWeight="400">
                                                             Pay with your Venmo account
-                                                        </Text>
-                                                    </VStack>
-                                                </HStack>
-                                            </Radio>
-                                        </Box>
-                                        <Box
-                                            p={4}
-                                            border="2px solid"
-                                            borderColor={paymentProvider === 'paypal' ? primary : borderColor}
-                                            rounded="xl"
-                                            cursor="pointer"
-                                            onClick={() => onPaymentProviderChange('paypal')}
-                                            bg={paymentProvider === 'paypal' ? primaryLight : cardBg}
-                                            _hover={{
-                                                borderColor: primary,
-                                                bg: paymentProvider === 'paypal' ? primaryLight : hoverBg
-                                            }}
-                                            transition="all 0.2s"
-                                        >
-                                            <Radio value="paypal" colorScheme="blue" size="lg">
-                                                <HStack spacing={3} ml={3}>
-                                                    <Icon as={FiCreditCard} boxSize={5} color={paymentProvider === 'paypal' ? primary : mutedText} />
-                                                    <VStack align="start" spacing={0}>
-                                                        <Text fontSize="sm" fontWeight="700" color={textColor}>
-                                                            PayPal
-                                                        </Text>
-                                                        <Text fontSize="xs" color={mutedText} fontWeight="400">
-                                                            Pay with your PayPal account
                                                         </Text>
                                                     </VStack>
                                                 </HStack>

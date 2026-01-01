@@ -47,9 +47,9 @@ const sendInviteEmail = async ({ to, inviteLink, serverName, senderName }: SendI
           <div style="background-color: #f0f8ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <h3 style="color: #0070BA; margin-top: 0;">What happens when you join?</h3>
             <ul style="color: #333; padding-left: 20px;">
-              <li>A personal server called "${serverName}" will be created for you</li>
-              <li>You can track expenses and split costs with group members</li>
-              <li>You can invite others to join your expense groups</li>
+              <li>You'll be added to the shared "${serverName}" server</li>
+              <li>You can track expenses and split costs with group members in real-time</li>
+              <li>You can invite others to join this shared expense group</li>
               <li>Access to all SquareUp features for managing shared expenses</li>
             </ul>
           </div>
@@ -73,8 +73,9 @@ ${senderName} has invited you to join the "${serverName}" group on SquareUp!
 SquareUp helps groups track and split expenses fairly with friends and family.
 
 When you join, you'll get:
-- A personal server called "${serverName}"
-- Tools to track expenses and split costs
+- Access to the shared "${serverName}" server
+- Real-time expense tracking with group members
+- Tools to split costs fairly
 - Ability to invite others to join
 
 Click here to join: ${inviteLink}

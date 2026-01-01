@@ -9,6 +9,8 @@ import {
     IconButton,
     Icon,
     useDisclosure,
+    useColorMode,
+    useColorModeValue,
 } from "@chakra-ui/react";
 import { FiPlus, FiCheckCircle, FiX, FiServer, FiTrash2, FiLogOut, FiLogIn, FiMenu, FiSettings, FiMoon, FiSun } from "react-icons/fi";
 import { SquareUpLogo } from "./Logo";
@@ -20,17 +22,16 @@ interface SidebarProps {
     isCreatingServer: boolean;
     newServerName: string;
     user: any;
-    isDarkMode: boolean;
     sidebarOpen: boolean;
     onToggleSidebar: () => void;
     onCreateServer: () => void;
+    onStartCreateServer: () => void;
     onCancelCreateServer: () => void;
     onNewServerNameChange: (name: string) => void;
     onServerSelect: (serverId: string) => void;
     onDeleteServer: (serverId: string) => void;
     onLogin: () => void;
     onLogout: () => void;
-    onToggleTheme: () => void;
 }
 
 export const Sidebar = ({
@@ -39,26 +40,27 @@ export const Sidebar = ({
     isCreatingServer,
     newServerName,
     user,
-    isDarkMode,
     sidebarOpen,
     onToggleSidebar,
     onCreateServer,
+    onStartCreateServer,
     onCancelCreateServer,
     onNewServerNameChange,
     onServerSelect,
     onDeleteServer,
     onLogin,
     onLogout,
-    onToggleTheme,
 }: SidebarProps) => {
-    const bgColor = "gray.50";
-    const cardBg = "white";
-    const borderColor = "gray.200";
-    const subtleBg = "gray.50";
-    const hoverBg = "gray.100";
-    const textColor = "gray.900";
-    const mutedText = "gray.600";
-    const primary = "#0070BA";
+    const bgColor = useColorModeValue("gray.50", "gray.900");
+    const cardBg = useColorModeValue("white", "gray.800");
+    const borderColor = useColorModeValue("gray.200", "gray.600");
+    const subtleBg = useColorModeValue("gray.50", "gray.700");
+    const hoverBg = useColorModeValue("gray.100", "gray.600");
+    const textColor = useColorModeValue("gray.900", "gray.100");
+    const mutedText = useColorModeValue("gray.600", "gray.400");
+    const primary = "#4A7C59"; // Muted sage green
+    const primaryLight = "#E8F5E8";
+    const { colorMode, toggleColorMode } = useColorMode();
 
     return (
         <Box
@@ -81,7 +83,7 @@ export const Sidebar = ({
                 <Box p={6} borderBottom="1px solid" borderColor={borderColor} bg={cardBg}>
                     <HStack justify="space-between" mb={5}>
                         <HStack spacing={3}>
-                            <SquareUpLogo isDark={isDarkMode} />
+                            <SquareUpLogo />
                             <VStack align="start" spacing={0}>
                                 <Text fontSize="md" fontWeight="700" color={textColor} letterSpacing="-0.02em">
                                     SquareUp
@@ -104,7 +106,7 @@ export const Sidebar = ({
                     </HStack>
                     <Button
                         leftIcon={<Icon as={FiPlus} />}
-                        onClick={() => onCreateServer()}
+                        onClick={() => onStartCreateServer()}
                         bg={primary}
                         color="white"
                         size="md"
@@ -185,11 +187,11 @@ export const Sidebar = ({
                                 key={server.id}
                                 p={3}
                                 rounded="xl"
-                                bg={selectedServerId === server.id ? "#E6F2FF" : "transparent"}
+                                bg={selectedServerId === server.id ? primaryLight : "transparent"}
                                 border={selectedServerId === server.id ? `2px solid ${primary}` : "2px solid transparent"}
                                 cursor="pointer"
                                 _hover={{
-                                    bg: selectedServerId === server.id ? "#E6F2FF" : hoverBg,
+                                    bg: selectedServerId === server.id ? primaryLight : hoverBg,
                                     borderColor: selectedServerId === server.id ? primary : borderColor,
                                     transform: "translateX(2px)"
                                 }}
@@ -220,13 +222,17 @@ export const Sidebar = ({
                                             <Text
                                                 fontSize="sm"
                                                 fontWeight={selectedServerId === server.id ? "700" : "600"}
-                                                color={textColor}
+                                                color={selectedServerId === server.id ? primary : textColor}
                                                 noOfLines={1}
                                                 letterSpacing="-0.01em"
                                             >
                                                 {server.name}
                                             </Text>
-                                            <Text fontSize="xs" color={mutedText} fontWeight="400">
+                                            <Text
+                                                fontSize="xs"
+                                                color={selectedServerId === server.id ? primary : mutedText}
+                                                fontWeight="400"
+                                            >
                                                 {server.members.length} {server.members.length === 1 ? 'member' : 'members'}
                                             </Text>
                                         </VStack>
@@ -285,8 +291,8 @@ export const Sidebar = ({
                             <HStack spacing={2}>
                                 <Button
                                     aria-label="Toggle theme"
-                                    leftIcon={<Icon as={isDarkMode ? FiSun : FiMoon} />}
-                                    onClick={onToggleTheme}
+                                    leftIcon={<Icon as={colorMode === 'dark' ? FiSun : FiMoon} />}
+                                    onClick={toggleColorMode}
                                     variant="ghost"
                                     size="sm"
                                     flex={1}

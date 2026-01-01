@@ -42,11 +42,16 @@ import { useDisclosure } from "@chakra-ui/react";
 import { Sidebar } from "../components/Sidebar";
 import { Header } from "../components/Header";
 import { PaymentModal } from "../components/PaymentModal";
+import { StripeConnectModal } from "../components/StripeConnectModal";
+import { VenmoPaymentModal } from "../components/VenmoPaymentModal";
+import { VenmoSettingsModal } from "../components/VenmoSettingsModal";
 
 // Hooks
 import { useAuth } from "../hooks/useAuth";
 import { useServers } from "../hooks/useServers";
 import { usePayment } from "../hooks/usePayment";
+import { useStripeConnect } from "../hooks/useStripeConnect";
+import { useVenmo } from "../hooks/useVenmo";
 
 // Types
 import { MoneyRequest } from "../types";
@@ -69,7 +74,6 @@ export default function Home() {
   const [requestTo, setRequestTo] = useState("");
   const [requestAmount, setRequestAmount] = useState("");
   const [requestDescription, setRequestDescription] = useState("");
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Hooks
@@ -98,19 +102,49 @@ export default function Home() {
     selectedDebt,
     paymentProvider,
     isProcessingPayment,
+    venmoPaymentData,
     setPaymentProvider,
     initiatePayment,
     processPayment,
     closePaymentModal,
+    markVenmoAsPaid,
   } = usePayment();
 
+  const {
+    accountStatus,
+    isLoading: isStripeLoading,
+    isCreatingAccount,
+    connectAccount,
+  } = useStripeConnect();
+
+  const {
+    venmoUsername,
+    isLoading: isVenmoLoading,
+    saveUsername,
+    generatePaymentLink,
+  } = useVenmo();
+
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const { isOpen: isStripeModalOpen, onOpen: onStripeModalOpen, onClose: onStripeModalClose } = useDisclosure();
+  const { isOpen: isVenmoPaymentOpen, onOpen: onVenmoPaymentOpen, onClose: onVenmoPaymentClose } = useDisclosure();
+  const { isOpen: isVenmoSettingsOpen, onOpen: onVenmoSettingsOpen, onClose: onVenmoSettingsClose } = useDisclosure();
   const toast = useToast();
 
   // Get current server data
   const groupMembers = currentServer?.members || [];
   const debts = currentServer?.debts || [];
   const requests = currentServer?.requests || [];
+
+  // Debug: Log when members change
+  useEffect(() => {
+    if (currentServer) {
+      console.log('Current server members updated:', {
+        serverName: currentServer.name,
+        memberCount: groupMembers.length,
+        members: groupMembers
+      });
+    }
+  }, [currentServer?.members, groupMembers.length]);
 
   // Filter requests for current user
   const pendingRequestsToMe = requests.filter(
@@ -155,7 +189,7 @@ export default function Home() {
   }, []);
 
   // Create new server
-  const handleCreateServer = () => {
+  const handleCreateServer = async () => {
     if (!newServerName.trim()) {
       toast({
         title: "Invalid name",
@@ -167,7 +201,7 @@ export default function Home() {
       return;
     }
 
-    const success = createServer(newServerName.trim());
+    const success = await createServer(newServerName.trim());
     if (success) {
       setNewServerName("");
       setIsCreatingServer(false);
@@ -257,7 +291,7 @@ export default function Home() {
     });
   };
 
-  const handleAddDebt = () => {
+  const handleAddDebt = async () => {
     if (!currentServer || !selectedServerId || !user) return;
     if (!to || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       toast({
@@ -270,7 +304,7 @@ export default function Home() {
       return;
     }
 
-    const success = addDebt(
+    const success = await addDebt(
       selectedServerId,
       user.displayName || user.email || "You",
       to,
@@ -292,7 +326,25 @@ export default function Home() {
 
   // Send email invitation
   const sendInvitation = async () => {
-    if (!user || !currentServer || !inviteEmail.trim()) return;
+    if (!user || !currentServer || !inviteEmail.trim() || !selectedServerId) {
+      console.error('Missing required data for invitation:', {
+        user: !!user,
+        currentServer: !!currentServer,
+        inviteEmail: inviteEmail.trim(),
+        selectedServerId
+      });
+
+      if (!selectedServerId) {
+        toast({
+          title: "No server selected",
+          description: "Please select a server first",
+          status: "warning",
+          duration: 3000,
+          isClosable: true,
+        });
+      }
+      return;
+    }
 
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -310,8 +362,15 @@ export default function Home() {
     setIsSendingInvite(true);
 
     try {
-      // Generate invite link (simple version)
-      const inviteLink = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/join?email=${encodeURIComponent(inviteEmail.trim())}&server=${encodeURIComponent(currentServer.name)}`;
+      // Generate invite link (simple version) - Use localhost for local development
+      const inviteLink = `http://localhost:3000/join?email=${encodeURIComponent(inviteEmail.trim())}&serverId=${encodeURIComponent(selectedServerId || '')}`;
+
+      console.log('Generating invite link:', {
+        email: inviteEmail.trim(),
+        serverId: selectedServerId,
+        inviteLink,
+        selectedServerIdType: typeof selectedServerId
+      });
 
       // Send the invitation email
       const emailResponse = await fetch('/api/send-invite', {
@@ -323,6 +382,7 @@ export default function Home() {
           to: inviteEmail.trim(),
           inviteLink,
           serverName: currentServer.name,
+          serverId: selectedServerId,
           senderName: user.displayName || user.email || 'Someone',
         }),
       });
@@ -358,7 +418,7 @@ export default function Home() {
     }
   };
 
-  const toggleBackground = () => setIsDarkMode((prev) => !prev);
+  // Dark mode is now handled by Chakra UI
 
   // Handle payment
   const handlePayment = async (debt: { from: string; to: string; amount: number }, index: number) => {
@@ -367,31 +427,101 @@ export default function Home() {
   };
 
   const handleProcessPayment = async () => {
-    if (!user) return;
+    if (!user || !selectedDebt || !currentServer) return;
 
     try {
+      // Find recipient user ID from server members
+      let recipientUserId: string | undefined;
+      const recipientIndex = currentServer.members.findIndex(m => m === selectedDebt.to);
+      if (recipientIndex >= 0 && currentServer.memberIds && currentServer.memberIds[recipientIndex]) {
+        recipientUserId = currentServer.memberIds[recipientIndex];
+      }
+
       if (paymentProvider === 'stripe') {
+        // Update payment hook to include recipientUserId
+        const processStripePayment = async () => {
+          const response = await fetch('/api/create-payment-intent', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              amount: selectedDebt.amount,
+              description: `Payment from ${selectedDebt.from} to ${selectedDebt.to}`,
+              metadata: {
+                from: selectedDebt.from,
+                to: selectedDebt.to,
+                serverId: selectedServerId || '',
+                userId: user.uid,
+                recipientUserId: recipientUserId || '',
+                debtIndex: selectedDebt.index.toString(),
+              },
+              successUrl: `${window.location.origin}/?payment=success&debtIndex=${selectedDebt.index}`,
+              cancelUrl: `${window.location.origin}/?payment=cancelled`,
+            }),
+          });
+
+          const { url, sessionId, error, recipientHasAccount } = await response.json();
+
+          if (error) {
+            throw new Error(error);
+          }
+
+          if (!url) {
+            throw new Error('Failed to create checkout session');
+          }
+
+          // Warn if recipient doesn't have account
+          if (!recipientHasAccount) {
+            toast({
+              title: 'Recipient not set up',
+              description: `${selectedDebt.to} hasn't connected their Stripe account. Payment will go to your account.`,
+              status: 'warning',
+              duration: 5000,
+              isClosable: true,
+            });
+          }
+
+          // Redirect to Stripe Checkout
+          window.location.href = url;
+        };
+
         // For Stripe, close modal first since redirect will happen immediately
         onClose();
         closePaymentModal();
-        // Note: processPayment will redirect, so code below won't execute for Stripe
-      } else if (paymentProvider === 'venmo' || paymentProvider === 'paypal') {
+        await processStripePayment();
+        // Note: window.location.href redirect happens here, so code below won't execute
+      } else if (paymentProvider === 'venmo') {
+        // For Venmo, generate payment link and show Venmo modal
+        onClose(); // Close the main payment modal
+        try {
+          await processPayment(
+            selectedServerId,
+            user.uid,
+            (debtIndex) => {
+              removeDebt(selectedServerId!, debtIndex);
+            },
+            generatePaymentLink,
+            recipientUserId || null
+          );
+          // Show Venmo payment modal
+          onVenmoPaymentOpen();
+        } catch (error: any) {
+          toast({
+            title: 'Venmo payment failed',
+            description: error.message || 'Failed to generate Venmo payment link',
+            status: 'error',
+            duration: 5000,
+            isClosable: true,
+          });
+        }
+      } else if (paymentProvider === 'paypal') {
         toast({
-          title: `${paymentProvider === 'venmo' ? 'Venmo' : 'PayPal'} Payment`,
-          description: `Redirecting to ${paymentProvider === 'venmo' ? 'Venmo' : 'PayPal'}...`,
+          title: 'PayPal Payment',
+          description: 'PayPal integration coming soon...',
           status: 'info',
           duration: 3000,
         });
-      }
-
-      await processPayment(selectedServerId, user.uid, (debtIndex) => {
-        removeDebt(selectedServerId!, debtIndex);
-      });
-
-      // Only close modal for non-Stripe payments (Stripe already closed above)
-      if (paymentProvider !== 'stripe') {
-        onClose();
-        closePaymentModal();
       }
     } catch (error: any) {
       console.error('Payment error:', error);
@@ -418,7 +548,7 @@ export default function Home() {
   };
 
   // Create money request
-  const createRequest = () => {
+  const createRequest = async () => {
     if (!currentServer || !user) return;
     if (!requestTo || !requestAmount || isNaN(parseFloat(requestAmount)) || parseFloat(requestAmount) <= 0) {
       toast({
@@ -442,7 +572,7 @@ export default function Home() {
     };
 
     if (selectedServerId) {
-      addRequest(selectedServerId, newRequest);
+      await addRequest(selectedServerId, newRequest);
     }
     setRequestTo("");
     setRequestAmount("");
@@ -459,9 +589,9 @@ export default function Home() {
 
 
   // Reject request
-  const rejectRequest = (requestId: string) => {
+  const rejectRequest = async (requestId: string) => {
     if (!selectedServerId) return;
-    updateRequest(selectedServerId, requestId, 'rejected');
+    await updateRequest(selectedServerId, requestId, 'rejected');
     toast({
       title: "Request rejected",
       status: "info",
@@ -471,18 +601,19 @@ export default function Home() {
   };
 
   // PayPal/Venmo-inspired professional color scheme
-  const primary = "#0070BA"; // PayPal blue
-  const primaryHover = "#005EA6";
-  const primaryLight = "#E6F2FF";
-  const bgColor = useColorModeValue("#F7F9FA", "#0A0E27");
-  const cardBg = useColorModeValue("#FFFFFF", "#1A1F3A");
-  const borderColor = useColorModeValue("#E1E8ED", "#2A3454");
-  const subtleBg = useColorModeValue("#F7F9FA", "#151B35");
-  const hoverBg = useColorModeValue("#F0F4F8", "#1F2640");
+  const primary = "#4A7C59"; // Muted sage green
+  const primaryHover = "#3D6B4A";
+  const primaryLight = "#E8F5E8";
+  // Use Chakra's built-in color mode values
+  const bgColor = useColorModeValue("#F8F9FA", "#1A202C");
+  const cardBg = useColorModeValue("#FFFFFF", "#2D3748");
+  const borderColor = useColorModeValue("#E2E8F0", "#4A5568");
+  const subtleBg = useColorModeValue("#F7FAFC", "#2D3748");
+  const hoverBg = useColorModeValue("#EDF2F7", "#4A5568");
 
-  const textColor = useColorModeValue("#1C1E21", "#E4E6EB");
-  const mutedText = useColorModeValue("#65676B", "#B0B3B8");
-  const labelColor = useColorModeValue("#424242", "#CCCCCC");
+  const textColor = useColorModeValue("#1A202C", "#F7FAFC");
+  const mutedText = useColorModeValue("#718096", "#A0AEC0");
+  const labelColor = useColorModeValue("#2D3748", "#E2E8F0");
 
   // Success/Error colors
   const successColor = "#00A86B";
@@ -490,7 +621,7 @@ export default function Home() {
   const warningColor = "#FFB800";
 
   return (
-    <Box minHeight="100vh" bg="gray.50" position="relative" display="flex">
+    <Box minHeight="100vh" bg={bgColor} position="relative" display="flex">
       {/* Sidebar */}
       <Sidebar
         servers={servers}
@@ -498,10 +629,10 @@ export default function Home() {
         isCreatingServer={isCreatingServer}
         newServerName={newServerName}
         user={user}
-        isDarkMode={isDarkMode}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onCreateServer={handleCreateServer}
+        onStartCreateServer={() => setIsCreatingServer(true)}
         onCancelCreateServer={() => {
           setIsCreatingServer(false);
           setNewServerName("");
@@ -511,7 +642,6 @@ export default function Home() {
         onDeleteServer={handleDeleteServer}
         onLogin={handleLogin}
         onLogout={handleLogout}
-        onToggleTheme={toggleBackground}
       />
 
       {/* Main Content */}
@@ -523,6 +653,10 @@ export default function Home() {
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           onLogin={handleLogin}
+          onStripeConnect={onStripeModalOpen}
+          stripeAccountStatus={accountStatus.status}
+          onVenmoSettings={onVenmoSettingsOpen}
+          hasVenmoUsername={!!venmoUsername}
         />
 
         {/* Main Content Area */}
@@ -554,14 +688,14 @@ export default function Home() {
             </Container>
           ) : (
             <Container maxW="1200px" px={{ base: 4, md: 6 }} py={{ base: 8, md: 10 }}>
-              <Card
-                bg={cardBg}
-                border="1px solid"
-                borderColor={borderColor}
-                shadow="0 1px 3px rgba(0,0,0,0.1)"
-                rounded="2xl"
-                overflow="hidden"
-              >
+                <Card
+                  bg={cardBg}
+                  border="1px solid"
+                  borderColor={borderColor}
+                  shadow="0 1px 3px rgba(0,0,0,0.1)"
+                  rounded="xl"
+                  overflow="hidden"
+                >
                 <CardBody p={0}>
                   <Tabs variant="unstyled" size="md">
                     <TabList
@@ -710,7 +844,7 @@ export default function Home() {
                             <Box
                               p={5}
                               bg={subtleBg}
-                              rounded="xl"
+                              rounded="lg"
                               border="1px solid"
                               borderColor={borderColor}
                             >
@@ -1038,7 +1172,7 @@ export default function Home() {
                                   <VStack spacing={3} align="stretch">
                                     {groupMembers.map((name, idx) => (
                                       <HStack
-                                        key={idx}
+                                        key={`${name}-${idx}`}
                                         spacing={4}
                                         p={4}
                                         bg={subtleBg}
@@ -1575,6 +1709,99 @@ export default function Home() {
         isProcessingPayment={isProcessingPayment}
         onPaymentProviderChange={setPaymentProvider}
         onProcessPayment={handleProcessPayment}
+      />
+
+      <StripeConnectModal
+        isOpen={isStripeModalOpen}
+        onClose={onStripeModalClose}
+        accountStatus={accountStatus}
+        isLoading={isStripeLoading}
+        isCreatingAccount={isCreatingAccount}
+        onConnect={async () => {
+          try {
+            await connectAccount();
+          } catch (error: any) {
+            toast({
+              title: 'Connection failed',
+              description: error.message || 'Failed to connect Stripe account',
+              status: 'error',
+              duration: 5000,
+              isClosable: true,
+            });
+          }
+        }}
+      />
+
+      {selectedDebt && venmoPaymentData && (
+        <VenmoPaymentModal
+          isOpen={isVenmoPaymentOpen}
+          onClose={onVenmoPaymentClose}
+          debt={selectedDebt}
+          venmoLink={venmoPaymentData.venmoLink}
+          venmoWebLink={venmoPaymentData.venmoWebLink}
+          venmoUsername={venmoPaymentData.venmoUsername}
+          hasVenmoUsername={venmoPaymentData.hasVenmoUsername}
+          onOpenVenmo={() => {
+            if (venmoPaymentData.venmoLink) {
+              window.location.href = venmoPaymentData.venmoLink;
+            } else if (venmoPaymentData.venmoWebLink) {
+              window.open(venmoPaymentData.venmoWebLink, '_blank');
+            }
+          }}
+          onCopyLink={() => {
+            if (venmoPaymentData.venmoWebLink) {
+              navigator.clipboard.writeText(venmoPaymentData.venmoWebLink);
+              toast({
+                title: 'Link copied!',
+                description: 'Venmo payment link copied to clipboard',
+                status: 'success',
+                duration: 2000,
+                isClosable: true,
+              });
+            }
+          }}
+          onMarkAsPaid={() => {
+            markVenmoAsPaid((debtIndex) => {
+              removeDebt(selectedServerId!, debtIndex);
+              toast({
+                title: 'Payment marked as paid',
+                description: 'Debt has been updated',
+                status: 'success',
+                duration: 3000,
+                isClosable: true,
+              });
+            });
+            onVenmoPaymentClose();
+          }}
+        />
+      )}
+
+      <VenmoSettingsModal
+        isOpen={isVenmoSettingsOpen}
+        onClose={onVenmoSettingsClose}
+        currentUsername={venmoUsername}
+        onSave={async (username) => {
+          try {
+            await saveUsername(username);
+            toast({
+              title: 'Venmo username saved!',
+              description: 'Others can now pay you through Venmo',
+              status: 'success',
+              duration: 3000,
+              isClosable: true,
+            });
+            onVenmoSettingsClose();
+          } catch (error: any) {
+            toast({
+              title: 'Failed to save username',
+              description: error.message || 'Please try again',
+              status: 'error',
+              duration: 5000,
+              isClosable: true,
+            });
+          }
+        }}
+        isLoading={isVenmoLoading}
       />
     </Box>
   );

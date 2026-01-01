@@ -7,8 +7,10 @@ import {
     VStack,
     IconButton,
     Icon,
+    Badge,
+    useColorModeValue,
 } from "@chakra-ui/react";
-import { FiMenu, FiLogIn } from "react-icons/fi";
+import { FiMenu, FiLogIn, FiCreditCard, FiCheckCircle, FiZap } from "react-icons/fi";
 import { Server } from "../types";
 
 interface HeaderProps {
@@ -17,6 +19,10 @@ interface HeaderProps {
     sidebarOpen: boolean;
     onToggleSidebar: () => void;
     onLogin: () => void;
+    onStripeConnect?: () => void;
+    stripeAccountStatus?: 'none' | 'pending' | 'active';
+    onVenmoSettings?: () => void;
+    hasVenmoUsername?: boolean;
 }
 
 export const Header = ({
@@ -25,13 +31,17 @@ export const Header = ({
     sidebarOpen,
     onToggleSidebar,
     onLogin,
+    onStripeConnect,
+    stripeAccountStatus = 'none',
+    onVenmoSettings,
+    hasVenmoUsername = false,
 }: HeaderProps) => {
-    const bgColor = "white";
-    const borderColor = "gray.200";
-    const textColor = "gray.900";
-    const mutedText = "gray.600";
-    const primary = "#0070BA";
-    const primaryHover = "#005EA6";
+    const bgColor = useColorModeValue("white", "gray.800");
+    const borderColor = useColorModeValue("gray.200", "gray.600");
+    const textColor = useColorModeValue("gray.900", "gray.100");
+    const mutedText = useColorModeValue("gray.600", "gray.400");
+    const primary = "#4A7C59"; // Muted sage green
+    const primaryHover = "#3D6B4A";
 
     return (
         <Box
@@ -74,6 +84,56 @@ export const Header = ({
                     </VStack>
                 </HStack>
                 <HStack spacing={3}>
+                    {user && onVenmoSettings && (
+                        <Button
+                            leftIcon={<Icon as={hasVenmoUsername ? FiCheckCircle : FiZap} />}
+                            onClick={onVenmoSettings}
+                            variant={hasVenmoUsername ? 'outline' : 'solid'}
+                            bg={hasVenmoUsername ? 'transparent' : '#3D95CE'}
+                            color={hasVenmoUsername ? 'blue.600' : 'white'}
+                            borderColor={hasVenmoUsername ? 'blue.300' : 'transparent'}
+                            size="sm"
+                            fontWeight="600"
+                            fontSize="xs"
+                            rounded="lg"
+                            px={4}
+                            h="36px"
+                            _hover={{ 
+                                bg: hasVenmoUsername ? 'blue.50' : '#2D7BB8', 
+                                transform: "translateY(-1px)", 
+                                boxShadow: "md" 
+                            }}
+                            _active={{ transform: "translateY(0)" }}
+                            transition="all 0.2s"
+                        >
+                            {hasVenmoUsername ? 'Venmo Set' : 'Venmo'}
+                        </Button>
+                    )}
+                    {user && onStripeConnect && (
+                        <Button
+                            leftIcon={<Icon as={stripeAccountStatus === 'active' ? FiCheckCircle : FiCreditCard} />}
+                            onClick={onStripeConnect}
+                            variant={stripeAccountStatus === 'active' ? 'outline' : 'solid'}
+                            bg={stripeAccountStatus === 'active' ? 'transparent' : primary}
+                            color={stripeAccountStatus === 'active' ? 'green.600' : 'white'}
+                            borderColor={stripeAccountStatus === 'active' ? 'green.300' : 'transparent'}
+                            size="sm"
+                            fontWeight="600"
+                            fontSize="xs"
+                            rounded="lg"
+                            px={4}
+                            h="36px"
+                            _hover={{ 
+                                bg: stripeAccountStatus === 'active' ? 'green.50' : primaryHover, 
+                                transform: "translateY(-1px)", 
+                                boxShadow: "md" 
+                            }}
+                            _active={{ transform: "translateY(0)" }}
+                            transition="all 0.2s"
+                        >
+                            {stripeAccountStatus === 'active' ? 'Payment Ready' : 'Connect Payment'}
+                        </Button>
+                    )}
                     {!user && (
                         <Button
                             leftIcon={<Icon as={FiLogIn} />}

@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, onSnapshot, query, where, orderBy, addDoc, deleteDoc, arrayUnion, arrayRemove, serverTimestamp } from "firebase/firestore";
 
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -24,5 +24,26 @@ provider.setCustomParameters({
 });
 
 const db = getFirestore(app);
+
+// Firestore helper functions for server operations
+export const serversCollection = collection(db, 'servers');
+export const serverMembersCollection = (serverId: string) => collection(db, 'servers', serverId, 'members');
+
+export {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  onSnapshot,
+  query,
+  where,
+  orderBy,
+  addDoc,
+  deleteDoc,
+  arrayUnion,
+  arrayRemove,
+  serverTimestamp
+};
 
 export { auth, provider, db, app };

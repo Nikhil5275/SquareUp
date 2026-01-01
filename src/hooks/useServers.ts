@@ -1,95 +1,170 @@
 import { useState, useEffect } from "react";
 import { Server, MoneyRequest } from "../types";
+import {
+    db,
+    serversCollection,
+    doc,
+    setDoc,
+    getDoc,
+    updateDoc,
+    onSnapshot,
+    query,
+    where,
+    addDoc,
+    deleteDoc,
+    arrayUnion,
+    arrayRemove,
+    serverTimestamp
+} from "../firebase";
 
 export const useServers = (user: any) => {
     const [servers, setServers] = useState<Server[]>([]);
     const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
     const [isCreatingServer, setIsCreatingServer] = useState(false);
     const [newServerName, setNewServerName] = useState("");
+    const [loading, setLoading] = useState(true);
 
-    // Load servers from localStorage
+    // Load servers from Firestore with real-time updates
     useEffect(() => {
-        if (user) {
-            const savedServers = localStorage.getItem(`servers_${user.uid}`);
-            if (savedServers) {
-                const parsed = JSON.parse(savedServers);
-                // Add requests property for backward compatibility
-                const serversWithRequests = parsed.map((server: any) => ({
-                    ...server,
-                    requests: server.requests || [],
-                }));
-                setServers(serversWithRequests);
-                if (serversWithRequests.length > 0 && !selectedServerId) {
-                    setSelectedServerId(serversWithRequests[0].id);
+        if (!user) {
+            setServers([]);
+            setLoading(false);
+            return;
+        }
+
+        setLoading(true);
+
+        // Query servers where the user is a member
+        const q = query(serversCollection, where('memberIds', 'array-contains', user.uid));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const serverData: Server[] = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                const server = {
+                    id: doc.id,
+                    name: data.name,
+                    members: data.members || [],
+                    debts: data.debts || [],
+                    requests: data.requests || [],
+                    createdAt: data.createdAt?.toMillis() || Date.now(),
+                    createdBy: data.createdBy,
+                    memberIds: data.memberIds || [],
+                };
+                serverData.push(server);
+                
+                // Log member updates for debugging
+                if (server.members.length > 0) {
+                    console.log(`Server "${server.name}" has ${server.members.length} members:`, server.members);
                 }
+            });
+
+            setServers(serverData);
+            setLoading(false);
+
+            // Auto-select first server if none selected
+            if (serverData.length > 0 && !selectedServerId) {
+                setSelectedServerId(serverData[0].id);
             }
-        }
-    }, [user]);
-
-    // Save servers to localStorage
-    useEffect(() => {
-        if (user && servers.length > 0) {
-            localStorage.setItem(`servers_${user.uid}`, JSON.stringify(servers));
-        }
-    }, [servers, user]);
-
-    const createServer = (name: string) => {
-        if (!name.trim() || !user) return false;
-
-        const newServer: Server = {
-            id: Date.now().toString(),
-            name: name.trim(),
-            members: [],
-            debts: [],
-            requests: [],
-            createdAt: Date.now(),
-        };
-
-        setServers(prev => [...prev, newServer]);
-        setSelectedServerId(newServer.id);
-        return true;
-    };
-
-    const deleteServer = (serverId: string) => {
-        const updated = servers.filter(s => s.id !== serverId);
-        setServers(updated);
-        if (selectedServerId === serverId) {
-            setSelectedServerId(updated.length > 0 ? updated[0].id : null);
-        }
-    };
-
-    const addMember = (serverId: string, memberName: string) => {
-        if (!memberName.trim()) return false;
-
-        const updated = servers.map(s => {
-            if (s.id === serverId) {
-                if (s.members.includes(memberName.trim().toLowerCase())) {
-                    return s; // Already exists
-                }
-                return { ...s, members: [...s.members, memberName.trim()] };
-            }
-            return s;
+        }, (error) => {
+            console.error('Firestore listener error:', error);
+            setLoading(false);
         });
 
-        setServers(updated);
-        return true;
+        return () => unsubscribe();
+    }, [user]);
+
+    const createServer = async (name: string) => {
+        if (!name.trim() || !user) return false;
+
+        try {
+            const serverData = {
+                name: name.trim(),
+                members: [user.displayName || user.email || 'Anonymous'],
+                debts: [],
+                requests: [],
+                createdAt: serverTimestamp(),
+                createdBy: user.uid,
+                memberIds: [user.uid],
+            };
+
+            const docRef = await addDoc(serversCollection, serverData);
+
+            // The onSnapshot listener will automatically update the servers state
+            setSelectedServerId(docRef.id);
+            return true;
+        } catch (error) {
+            console.error('Error creating server:', error);
+            return false;
+        }
     };
 
-    const addDebt = (serverId: string, from: string, to: string, amount: number) => {
+    const deleteServer = async (serverId: string) => {
+        try {
+            await deleteDoc(doc(serversCollection, serverId));
+            // The onSnapshot listener will automatically update the servers state
+            if (selectedServerId === serverId) {
+                const remainingServers = servers.filter(s => s.id !== serverId);
+                setSelectedServerId(remainingServers.length > 0 ? remainingServers[0].id : null);
+            }
+        } catch (error) {
+            console.error('Error deleting server:', error);
+        }
+    };
+
+    const addMember = async (serverId: string, memberName: string, memberUid?: string) => {
+        if (!memberName.trim()) return false;
+
+        try {
+            const serverRef = doc(serversCollection, serverId);
+            const serverDoc = await getDoc(serverRef);
+
+            if (!serverDoc.exists()) return false;
+
+            const currentData = serverDoc.data();
+            const currentMembers = currentData?.members || [];
+            const currentMemberIds = currentData?.memberIds || [];
+
+            // Check if member already exists
+            if (currentMembers.includes(memberName.trim())) {
+                return false; // Already exists
+            }
+
+            const updateData: any = {
+                members: arrayUnion(memberName.trim())
+            };
+
+            // If we have a member UID (for invited users), add it to memberIds
+            if (memberUid && !currentMemberIds.includes(memberUid)) {
+                updateData.memberIds = arrayUnion(memberUid);
+            }
+
+            await updateDoc(serverRef, updateData);
+            return true;
+        } catch (error) {
+            console.error('Error adding member:', error);
+            return false;
+        }
+    };
+
+    const addDebt = async (serverId: string, from: string, to: string, amount: number) => {
         if (!from || !to || !amount || amount <= 0) return false;
 
-        const newDebt = { from, to, amount };
-        const updated = servers.map(s =>
-            s.id === serverId
-                ? { ...s, debts: [...s.debts, newDebt] }
-                : s
-        );
+        try {
+            const serverRef = doc(serversCollection, serverId);
+            const newDebt = { from, to, amount };
 
-        setServers(updated);
-        return true;
+            await updateDoc(serverRef, {
+                debts: arrayUnion(newDebt)
+            });
+            return true;
+        } catch (error) {
+            console.error('Error adding debt:', error);
+            return false;
+        }
     };
 
-    const simplifyDebts = (serverId: string) => {
+    const simplifyDebts = async (serverId: string) => {
         const server = servers.find(s => s.id === serverId);
         if (!server) return;
 
@@ -118,68 +193,87 @@ export const useServers = (user: any) => {
             if (creditors[j][1] === 0) j++;
         }
 
-        const updated = servers.map(s =>
-            s.id === serverId
-                ? { ...s, debts: simplified }
-                : s
-        );
-
-        setServers(updated);
+        try {
+            const serverRef = doc(serversCollection, serverId);
+            await updateDoc(serverRef, {
+                debts: simplified
+            });
+        } catch (error) {
+            console.error('Error simplifying debts:', error);
+        }
     };
 
-    const addRequest = (serverId: string, request: MoneyRequest) => {
-        const updated = servers.map(s =>
-            s.id === serverId
-                ? { ...s, requests: [...s.requests, request] }
-                : s
-        );
-        setServers(updated);
+    const addRequest = async (serverId: string, request: MoneyRequest) => {
+        try {
+            const serverRef = doc(serversCollection, serverId);
+            await updateDoc(serverRef, {
+                requests: arrayUnion(request)
+            });
+        } catch (error) {
+            console.error('Error adding request:', error);
+        }
     };
 
-    const updateRequest = (serverId: string, requestId: string, status: 'pending' | 'approved' | 'rejected') => {
-        const updated = servers.map(s => {
-            if (s.id === serverId) {
-                const updatedRequests = s.requests.map(r =>
-                    r.id === requestId ? { ...r, status } : r
-                );
-                return { ...s, requests: updatedRequests };
-            }
-            return s;
-        });
-        setServers(updated);
+    const updateRequest = async (serverId: string, requestId: string, status: 'pending' | 'approved' | 'rejected') => {
+        try {
+            const server = servers.find(s => s.id === serverId);
+            if (!server) return;
+
+            const updatedRequests = server.requests.map(r =>
+                r.id === requestId ? { ...r, status } : r
+            );
+
+            const serverRef = doc(serversCollection, serverId);
+            await updateDoc(serverRef, {
+                requests: updatedRequests
+            });
+        } catch (error) {
+            console.error('Error updating request:', error);
+        }
     };
 
-    const approveRequest = (serverId: string, requestId: string) => {
+    const approveRequest = async (serverId: string, requestId: string) => {
         const server = servers.find(s => s.id === serverId);
         if (!server) return;
 
         const request = server.requests.find(r => r.id === requestId);
         if (!request) return;
 
-        // Update request status and add to debts
-        const updated = servers.map(s => {
-            if (s.id === serverId) {
-                const updatedRequests = s.requests.map(r =>
-                    r.id === requestId ? { ...r, status: 'approved' as const } : r
-                );
-                const newDebt = { from: request.to, to: request.from, amount: request.amount };
-                return { ...s, requests: updatedRequests, debts: [...s.debts, newDebt] };
-            }
-            return s;
-        });
+        try {
+            const serverRef = doc(serversCollection, serverId);
 
-        setServers(updated);
+            // Update request status
+            const updatedRequests = server.requests.map(r =>
+                r.id === requestId ? { ...r, status: 'approved' as const } : r
+            );
+
+            // Add new debt
+            const newDebt = { from: request.to, to: request.from, amount: request.amount };
+
+            await updateDoc(serverRef, {
+                requests: updatedRequests,
+                debts: arrayUnion(newDebt)
+            });
+        } catch (error) {
+            console.error('Error approving request:', error);
+        }
     };
 
-    const removeDebt = (serverId: string, debtIndex: number) => {
-        const updated = servers.map(s => {
-            if (s.id === serverId) {
-                const newDebts = s.debts.filter((_, idx) => idx !== debtIndex);
-                return { ...s, debts: newDebts };
-            }
-            return s;
-        });
-        setServers(updated);
+    const removeDebt = async (serverId: string, debtIndex: number) => {
+        const server = servers.find(s => s.id === serverId);
+        if (!server) return;
+
+        try {
+            const debtToRemove = server.debts[debtIndex];
+            if (!debtToRemove) return;
+
+            const serverRef = doc(serversCollection, serverId);
+            await updateDoc(serverRef, {
+                debts: arrayRemove(debtToRemove)
+            });
+        } catch (error) {
+            console.error('Error removing debt:', error);
+        }
     };
 
     const currentServer = servers.find(s => s.id === selectedServerId);
@@ -190,6 +284,7 @@ export const useServers = (user: any) => {
         currentServer,
         isCreatingServer,
         newServerName,
+        loading,
         setSelectedServerId,
         setIsCreatingServer,
         setNewServerName,
