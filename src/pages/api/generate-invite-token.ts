@@ -101,7 +101,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
-      const inviteLink = `${process.env.NEXT_PUBLIC_BASE_URL}/join?token=${token}`;
+      // Use BASE_URL from env, fallback to NEXT_PUBLIC_BASE_URL, then localhost
+      const baseUrl = process.env.BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+      console.log('API INVITE: BASE_URL:', process.env.BASE_URL);
+      console.log('API INVITE: NEXT_PUBLIC_BASE_URL:', process.env.NEXT_PUBLIC_BASE_URL);
+      const inviteLink = `${baseUrl}/join?token=${token}`;
 
       res.status(200).json({ message: 'Invitation token generated', inviteLink, token });
     } catch (error) {
