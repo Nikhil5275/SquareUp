@@ -362,8 +362,8 @@ export default function Home() {
     setIsSendingInvite(true);
 
     try {
-      // Generate invite link (simple version) - Use localhost for local development
-      const inviteLink = `http://localhost:3000/join?email=${encodeURIComponent(inviteEmail.trim())}&serverId=${encodeURIComponent(selectedServerId || '')}`;
+      // Generate invite link - Production URL
+      const inviteLink = `https://square-up1.netlify.app/join?email=${encodeURIComponent(inviteEmail.trim())}&serverId=${encodeURIComponent(selectedServerId || '')}`;
 
       console.log('Generating invite link:', {
         email: inviteEmail.trim(),
@@ -621,7 +621,7 @@ export default function Home() {
   const warningColor = "#FFB800";
 
   return (
-    <Box minHeight="100vh" bg={bgColor} position="relative" display="flex">
+    <Box minHeight="100vh" bg="gray.50" position="relative" display="flex">
       {/* Sidebar */}
       <Sidebar
         servers={servers}
