@@ -11,13 +11,24 @@ declare global {
 // Use global._firebaseAdminApp directly
 
 const serviceAccountPath = process.env.FIREBASE_ADMIN_SDK_PATH;
+const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
 // Check if Firebase Admin app is already initialized
 if (!global._firebaseAdminApp) {
-    if (!serviceAccountPath) {
-        console.error("Firebase Admin SDK path is missing. Admin SDK will not be initialized.");
-        console.error("Please set FIREBASE_ADMIN_SDK_PATH in your .env.local file");
-    } else {
+    let serviceAccountConfig: any = null;
+
+    // Try to get service account from environment variable first (for production)
+    if (serviceAccountJson) {
+        try {
+            serviceAccountConfig = JSON.parse(serviceAccountJson);
+            console.log("Firebase Admin: Using service account from environment variable");
+        } catch (e) {
+            console.error("Firebase Admin: Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", e);
+        }
+    }
+    
+    // Fall back to file path (for local development)
+    if (!serviceAccountConfig && serviceAccountPath) {
         try {
             const absolutePath = path.join(process.cwd(), serviceAccountPath);
 
@@ -26,30 +37,35 @@ if (!global._firebaseAdminApp) {
                 console.error("Please ensure the file exists and the path is correct.");
             } else {
                 const rawFileContent = fs.readFileSync(absolutePath, 'utf8');
-                const serviceAccountConfig = JSON.parse(rawFileContent);
+                serviceAccountConfig = JSON.parse(rawFileContent);
+                console.log("Firebase Admin: Using service account from file");
+            }
+        } catch (error) {
+            console.error("Firebase admin file read error:", error);
+        }
+    }
 
-                // Validate required fields
-                const requiredFields = ['project_id', 'private_key', 'client_email'];
-                const missingFields = requiredFields.filter(field => !serviceAccountConfig[field]);
+    if (!serviceAccountConfig) {
+        console.error("Firebase Admin SDK: No service account configuration found.");
+        console.error("For local dev: Set FIREBASE_ADMIN_SDK_PATH in .env.local");
+        console.error("For production: Set FIREBASE_SERVICE_ACCOUNT_JSON in environment variables");
+    } else {
+        try {
+            // Validate required fields
+            const requiredFields = ['project_id', 'private_key', 'client_email'];
+            const missingFields = requiredFields.filter(field => !serviceAccountConfig[field]);
 
-                if (missingFields.length > 0) {
-                    console.error(`Service account JSON missing required fields: ${missingFields.join(', ')}`);
-                } else {
-                    global._firebaseAdminApp = admin.initializeApp({
-                        credential: admin.credential.cert(serviceAccountConfig),
-                    });
-                    console.log("Firebase Admin SDK initialized successfully (via globalThis). Once.");
-                    console.log("Initialized Firebase App instance:", global._firebaseAdminApp.name);
-                    console.log("Project ID:", serviceAccountConfig.project_id);
-                }
+            if (missingFields.length > 0) {
+                console.error(`Service account JSON missing required fields: ${missingFields.join(', ')}`);
+            } else {
+                global._firebaseAdminApp = admin.initializeApp({
+                    credential: admin.credential.cert(serviceAccountConfig),
+                });
+                console.log("Firebase Admin SDK initialized successfully.");
+                console.log("Project ID:", serviceAccountConfig.project_id);
             }
         } catch (error) {
             console.error("Firebase admin initialization error:", error);
-            console.error("Please check:");
-            console.error("1. The service account JSON file is valid");
-            console.error("2. The service account has proper permissions");
-            console.error("3. The FIREBASE_ADMIN_SDK_PATH is correct");
-            throw new Error("Failed to initialize Firebase Admin SDK. Check FIREBASE_ADMIN_SDK_PATH and file content.");
         }
     }
 }
