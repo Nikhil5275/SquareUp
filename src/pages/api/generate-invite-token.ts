@@ -101,8 +101,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
-      // DEBUG: Hardcoding for Netlify bug test
-      const baseUrl = 'https://square-up1.netlify.app';
+      // Production URL
+      const baseUrl = 'https://squareup-1.netlify.app';
       console.log('API INVITE: BASE_URL:', process.env.BASE_URL);
       console.log('API INVITE: NEXT_PUBLIC_BASE_URL:', process.env.NEXT_PUBLIC_BASE_URL);
       const inviteLink = `${baseUrl}/join?token=${token}`;
